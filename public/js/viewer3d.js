@@ -131,10 +131,10 @@ export function createViewer3D(container) {
   }
 
   function edgeBox(edge, w, h, d, t) {
-    if (edge === 'L') return { size: [t, h, d], pos: [0, h / 2, d / 2] };
-    if (edge === 'R') return { size: [t, h, d], pos: [w, h / 2, d / 2] };
-    if (edge === 'B') return { size: [w, t, d], pos: [w / 2, 0, d / 2] };
-    if (edge === 'T') return { size: [w, t, d], pos: [w / 2, h, d / 2] };
+    if (edge === 'L') return { size: [t, h, d], pos: [t / 2, h / 2, d / 2] };
+    if (edge === 'R') return { size: [t, h, d], pos: [w - t / 2, h / 2, d / 2] };
+    if (edge === 'B') return { size: [w, t, d], pos: [w / 2, t / 2, d / 2] };
+    if (edge === 'T') return { size: [w, t, d], pos: [w / 2, h - t / 2, d / 2] };
     return { size: [0, 0, 0], pos: [0, 0, 0] };
   }
 
