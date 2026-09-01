@@ -1,0 +1,26 @@
+{
+  "name": "system2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Automated Cabinet Manufacturing Operations System — Polyboard batch-to-bSolid (Biesse Rover A) network pipeline",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "postinstall": "node scripts/vendor.mjs",
+    "vendor": "node scripts/vendor.mjs",
+    "sample": "tsx scripts/generate-sample.ts",
+    "dev": "tsx server/index.ts",
+    "start": "tsx server/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

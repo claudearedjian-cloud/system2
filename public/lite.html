@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>system2 · Lite control panel</title>
+  <style>
+    body { font-family: Segoe UI, system-ui, Arial, sans-serif; background: #0d1419; color: #e6eef5; margin: 0; padding: 20px; }
+    h1 { font-size: 18px; margin: 0 0 4px; } h1 span { color: #2dd4bf; }
+    .muted { color: #8ba1b4; font-size: 12px; }
+    button { background: #2dd4bf; color: #04211d; border: 0; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; margin: 2px 6px 2px 0; }
+    button.ghost { background: #1d2c3a; color: #e6eef5; border: 1px solid #263849; }
+    button:hover { filter: brightness(1.08); }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #263849; }
+    th { color: #8ba1b4; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+    .card { background: #182430; border: 1px solid #263849; border-radius: 8px; padding: 14px; margin: 14px 0; }
+    a { color: #2dd4bf; }
+    #log { background: #0b1218; border: 1px solid #263849; border-radius: 8px; padding: 12px; font-family: Consolas, monospace; font-size: 12px; white-space: pre-wrap; min-height: 24px; margin-top: 10px; }
+    .labels-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+    .label-card { background: #fff; color: #111; border-radius: 6px; padding: 8px; font-size: 11px; }
+    .label-card .top { display: flex; justify-content: space-between; font-weight: 700; }
+    .label-card .bc { margin: 6px 0; text-align: center; }
+    .label-card .bc svg { max-width: 100%; height: 40px; }
+    .good { color: #3ecf8e; } .bad { color: #ef5350; }
+  </style>
+</head>
+<body>
+  <h1>system<span>2</span> · Lite control panel</h1>
+  <div class="muted">Minimal, no-graphics OPS engine. Same backend as the full app — safe on any PC.</div>
+
+  <div class="card">
+    <button onclick="loadSample()">▶ Load sample project</button>
+    <button class="ghost" onclick="loadProjects()">↻ Refresh list</button>
+    <button class="ghost" onclick="validate()">Pre-flight</button>
+    <button onclick="compile()">Compile .cix</button>
+    <button class="ghost" onclick="buildBom()">BOM</button>
+    <button onclick="distribute()">⇄ Distribute</button>
+    <button class="ghost" onclick="labels()">Labels</button>
+  </div>
+
+  <div class="card">
+    <b>Project:</b>
+    <select id="projects" onchange="openProject(this.value)"><option value="">(none)</option></select>
+    <span class="muted" id="summary"></span>
+  </div>
+
+  <div class="card">
+    <b>Parts</b>
+    <table id="parts"><thead><tr><th>Part ID</th><th>Name</th><th>Cabinet</th><th>Material</th><th>Size (mm)</th><th>Qty</th><th>.cix</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="card">
+    <b>Pre-flight</b>
+    <div id="validation" class="muted">not run</div>
+  </div>
+
+  <div class="card">
+    <b>Compiled .cix</b>
+    <div id="cix" class="muted">not compiled</div>
+  </div>
+
+  <div class="card">
+    <b>Bill of materials</b>
+    <div id="bom" class="muted">not generated</div>
+  </div>
+
+  <div class="card">
+    <b>Network distribution</b>
+    <div id="dist" class="muted">not run</div>
+  </div>
+
+  <div class="card">
+    <b>Part labels</b>
+    <div id="labels" class="muted">not generated</div>
+  </div>
+
+  <div id="log"></div>
+
+  <script>
+    // Plain JavaScript only: no modules, no canvas, no WebGL. Works everywhere.
+    var projectId = null;
+    var project = null;
+
+    function log(msg) { document.getElementById('log').textContent = msg; }
+
+    function api(path, opts) {
+      var o = opts || {};
+      var init = { method: o.method || 'GET', headers: {} };
+      if (o.body) { init.body = JSON.stringify(o.body); init.headers['Content-Type'] = 'application/json'; }
+      return fetch(path, init).then(function (r) {
+        return r.text().then(function (t) {
+          var data = t ? JSON.parse(t) : null;
+          if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+          return data;
+        });
+      });
+    }
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+      });
+    }
+
+    function loadProjects() {
+      log('Loading projects…');
+      api('/api/projects').then(function (list) {
+        var sel = document.getElementById('projects');
+        sel.innerHTML = '';
+        list.forEach(function (p) {
+          var o = document.createElement('option');
+          o.value = p.id; o.textContent = p.name + ' (' + p.stats.panels + ' parts)';
+          sel.appendChild(o);
+        });
+        if (list.length && !projectId) { projectId = list[list.length - 1].id; sel.value = projectId; openProject(projectId); }
+        log('✔ ' + list.length + ' project(s).');
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    function loadSample() {
+      log('Loading sample…');
+      api('/api/load-sample', { method: 'POST' }).then(function (r) {
+        projectId = r.projectId;
+        log('✔ Sample loaded.');
+        loadProjects();
+        openProject(r.projectId);
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    function openProject(id) {
+      if (!id) return;
+      projectId = id;
+      log('Opening project…');
+      api('/api/projects/' + encodeURIComponent(id)).then(function (p) {
+        project = p;
+        document.getElementById('summary').textContent =
+          ' — ' + p.stats.cabinets + ' cabinets, ' + p.stats.panels + ' parts, ' + p.stats.partInstances + ' instances';
+        renderParts(p);
+        log('✔ Project opened: ' + p.name);
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    function renderParts(p) {
+      var tbody = document.querySelector('#parts tbody');
+      tbody.innerHTML = '';
+      p.cabinets.forEach(function (c) {
+        c.panels.forEach(function (panel) {
+          var tr = document.createElement('tr');
+          [panel.id, panel.name, c.name, panel.material,
+           panel.width + '×' + panel.height + '×' + panel.thickness, panel.qty]
+            .forEach(function (txt) {
+              var td = document.createElement('td'); td.textContent = txt; tr.appendChild(td);
+            });
+          var td = document.createElement('td');
+          var a = document.createElement('a');
+          a.href = '/api/projects/' + encodeURIComponent(p.id) + '/cix/' + encodeURIComponent(panel.id);
+          a.textContent = 'download';
+          td.appendChild(a);
+          tr.appendChild(td);
+          tbody.appendChild(tr);
+        });
+      });
+    }
+
+    function validate() {
+      if (!projectId) { log('✖ Load a project first.'); return; }
+      log('Running validation…');
+      api('/api/projects/' + encodeURIComponent(projectId) + '/validation').then(function (r) {
+        var host = document.getElementById('validation');
+        if (r.ok) host.innerHTML = '<b class="good">PASS</b> — ' + r.warningCount + ' warning(s).';
+        else host.innerHTML = '<b class="bad">BLOCKED</b> — ' + r.errorCount + ' error(s), ' + r.warningCount + ' warning(s).';
+        var list = r.issues.map(function (i) {
+          return '• [' + i.severity + '] ' + esc(i.panelId) + ': ' + esc(i.message);
+        }).join('<br>');
+        host.innerHTML += '<br>' + (list || '<span class="muted">no issues</span>');
+        log('✔ Validation complete.');
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    function compile() {
+      if (!projectId) { log('✖ Load a project first.'); return; }
+      log('Compiling .cix…');
+      api('/api/projects/' + encodeURIComponent(projectId) + '/compile', { method: 'POST', body: {} }).then(function (r) {
+        var host = document.getElementById('cix');
+        if (r.blocked) {
+          host.innerHTML = '<b class="bad">Blocked by validation errors.</b>';
+        } else {
+          host.innerHTML = '<b class="good">' + r.files.length + ' file(s) compiled.</b><br>';
+          host.innerHTML += r.files.map(function (f) {
+            return '<a href="/api/projects/' + encodeURIComponent(projectId) + '/cix/' + encodeURIComponent(f.name) + '">' + esc(f.name) + '</a>';
+          }).join('<br>');
+        }
+        log('✔ Compilation done.');
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    function buildBom() {
+      if (!projectId) { log('✖ Load a project first.'); return; }
+      log('Building BOM…');
+      api('/api/projects/' + encodeURIComponent(projectId) + '/bom').then(function (bom) {
+        var host = document.getElementById('bom');
+        var matRows = bom.materials.map(function (m) {
+          return '<tr><td>' + esc(m.material) + '</td><td>' + m.thickness + '</td><td>' + m.instanceCount +
+            '</td><td>' + m.areaM2.toFixed(2) + ' m²</td><td>~' + m.estimatedBoards + '</td><td>' +
+            m.cost.toFixed(2) + ' ' + esc(bom.currency) + '</td></tr>';
+        }).join('');
+        host.innerHTML =
+          '<b>Est. cost: ' + bom.totalCost.toFixed(0) + ' ' + esc(bom.currency) + ' · edge banding ' + bom.edgebandMeters.toFixed(1) + ' m</b>' +
+          '<table><thead><tr><th>Material</th><th>T</th><th>Qty</th><th>Area</th><th>Boards</th><th>Cost</th></tr></thead><tbody>' + matRows + '</tbody></table>' +
+          '<p class="muted"><a href="/api/projects/' + encodeURIComponent(projectId) + '/bom.csv">Download BOM as CSV</a></p>';
+        log('✔ BOM built.');
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    function distribute() {
+      if (!projectId) { log('✖ Load a project first.'); return; }
+      log('Distributing .cix to network targets…');
+      api('/api/projects/' + encodeURIComponent(projectId) + '/distribute', { method: 'POST', body: {} }).then(function (r) {
+        var host = document.getElementById('dist');
+        if (!r.ok) { host.innerHTML = '<b class="bad">Blocked by validation errors.</b>'; log('✖ Blocked.'); return; }
+        var rows = r.targets.map(function (t) {
+          var result = t.error
+            ? '<span class="bad">failed: ' + esc(t.error) + '</span>'
+            : '<span class="good">' + t.count + ' files written</span>';
+          return '<tr><td>' + esc(t.name) + '</td><td>' + esc(t.dest) + '</td><td>' + result + '</td></tr>';
+        }).join('');
+        host.innerHTML = '<table><thead><tr><th>Target</th><th>Path</th><th>Result</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<p class="muted">Set the network target folder in the full app\'s Settings (or edit data/settings.json). On Windows, mount the SMB share to a drive letter and point the target at it.</p>';
+        log('✔ Distribution attempted.');
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    // --- Code-128 barcode (subset B), inlined so labels need no modules ---
+    var C128 = ['212222','222122','222221','121223','121322','131222','122213','122312','132212','221213','221312','231212','112232','122132','122231','113222','123122','123221','223211','221132','221231','213212','223112','312131','311222','321122','321221','312212','322112','322211','212123','212321','232121','111323','131123','131321','112313','132113','132311','211313','231113','231311','112133','112331','132131','113123','113321','133121','313121','211331','231131','213113','213311','213131','311123','311321','331121','312113','312311','332111','314111','221411','431111','111224','111422','121124','121421','141122','141221','112214','112412','122114','122411','142112','142211','241211','221114','413111','241112','134111','111242','121142','121241','114212','124112','124211','411212','421112','421211','212141','214121','412121','111143','111341','131141','114113','114311','411113','411311','113141','114131','311141','411131','211412','211214','211232','2331112'];
+    function code128(text) {
+      var codes = [104]; var sum = 104;
+      for (var i = 0; i < text.length; i++) {
+        var v = text.charCodeAt(i) - 32;
+        if (v < 0 || v > 95) return '<span class="muted">(unprintable barcode)</span>';
+        codes.push(v); sum += v * (i + 1);
+      }
+      codes.push(sum % 103); codes.push(106);
+      var mod = '';
+      for (var j = 0; j < codes.length; j++) mod += C128[codes[j]];
+      mod += '11';
+      var w = 0; for (var k = 0; k < mod.length; k++) w += parseInt(mod[k], 10);
+      var bars = ''; var x = 0;
+      for (var b = 0; b < mod.length; b++) {
+        var bw = parseInt(mod[b], 10);
+        if (b % 2 === 0) bars += '<rect x="' + x + '" y="0" width="' + bw + '" height="1" fill="#000"/>';
+        x += bw;
+      }
+      return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + w + ' 1" preserveAspectRatio="none" style="background:#fff">' + bars + '</svg>';
+    }
+
+    function labels() {
+      if (!projectId) { log('✖ Load a project first.'); return; }
+      log('Generating labels…');
+      api('/api/projects/' + encodeURIComponent(projectId) + '/labels').then(function (list) {
+        var host = document.getElementById('labels');
+        host.innerHTML = '<div class="labels-grid">' + list.map(function (lb) {
+          return '<div class="label-card">' +
+            '<div class="top"><span>' + esc(lb.name) + '</span><span>' + esc(lb.partId) + '</span></div>' +
+            '<div>' + esc(lb.project) + ' · ' + esc(lb.cabinet) + '</div>' +
+            '<div>' + esc(lb.material) + ' · ' + lb.width + '×' + lb.height + '×' + lb.thickness + ' mm</div>' +
+            '<div>Edge: ' + esc(lb.edgeband || '—') + ' · Qty ' + lb.qty + '</div>' +
+            '<div class="bc">' + code128(lb.barcode) + '</div>' +
+            '</div>';
+        }).join('') + '</div>' +
+          '<p><button onclick="window.print()">🖨 Print labels</button></p>';
+        log('✔ ' + list.length + ' labels generated.');
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    loadProjects();
+  </script>
+</body>
+</html>

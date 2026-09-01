@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>system2 — diagnostics</title>
+</head>
+<body style="background:#0d1419;color:#e6eef5;font-family:ui-monospace,Menlo,Consolas,monospace;padding:24px;line-height:1.5">
+  <h2 style="color:#2dd4bf">system2 diagnostics</h2>
+  <p>This page tests your browser and the local server. It runs automatically.<br>
+     When it shows <b>DONE</b>, select all the text below (Ctrl+A, Ctrl+C) and paste it in the chat.</p>
+  <pre id="out" style="white-space:pre-wrap;background:#0b1218;border:1px solid #263849;border-radius:8px;padding:16px;min-height:300px">Running…</pre>
+  <script>
+    (async function () {
+      var out = document.getElementById('out');
+      var lines = [];
+      function log(s) { lines.push(s); out.textContent = lines.join('\n'); }
+
+      log('URL     : ' + location.href);
+      log('Browser : ' + navigator.userAgent);
+      log('Time    : ' + new Date().toISOString());
+      log('');
+
+      async function test(name, fn) {
+        try {
+          var r = await fn();
+          log('✔ ' + name + ' — ' + r);
+        } catch (e) {
+          log('✖ ' + name + ' — ' + (e && e.message ? e.message : e));
+        }
+      }
+
+      await test('fetch /api/projects', async () => {
+        var r = await fetch('/api/projects');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var t = await r.text();
+        return 'HTTP ' + r.status + ', ' + t.length + ' bytes';
+      });
+
+      await test('fetch /js/app.js', async () => {
+        var r = await fetch('/js/app.js');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var t = await r.text();
+        return 'HTTP ' + r.status + ', ' + t.length + ' bytes, has lazy-3d import: ' + (t.indexOf("import('./viewer3d.js')") >= 0);
+      });
+
+      await test('fetch /vendor/three.module.js', async () => {
+        var r = await fetch('/vendor/three.module.js');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var t = await r.text();
+        return 'HTTP ' + r.status + ', ' + t.length + ' bytes';
+      });
+
+      await test('dynamic import /js/api.js', async () => {
+        var m = await import('/js/api.js?v=diag');
+        return 'loaded, exports: ' + Object.keys(m).join(',');
+      });
+
+      await test('dynamic import /vendor/three.module.js', async () => {
+        var m = await import('/vendor/three.module.js?v=diag');
+        return 'three loaded, REVISION=' + (m.REVISION || '?');
+      });
+
+      await test('Canvas 2D', async () => {
+        var c = document.createElement('canvas');
+        var ctx = c.getContext('2d');
+        if (!ctx) throw new Error('no 2d context');
+        ctx.fillRect(0, 0, 10, 10);
+        return 'ok';
+      });
+
+      await test('WebGL', async () => {
+        var c = document.createElement('canvas');
+        var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+        if (!gl) throw new Error('WebGL not available');
+        return 'ok — ' + (gl.getParameter(gl.RENDERER) || 'renderer unknown');
+      });
+
+      log('');
+      log('DONE — copy everything above and paste it in the chat.');
+    })();
+  </script>
+</body>
+</html>

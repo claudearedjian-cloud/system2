@@ -1,0 +1,16 @@
+Cabinet,Part ID,Name,Panel Type,Material,Thickness (mm),Width (mm),Height (mm),Qty,Grain,Edge L,Edge R,Edge B,Edge T
+BASE-01,001,Left Side,Left Side,18mm Melamine White,18,560,720,1,vertical,ABS 1mm,,,
+BASE-01,002,Right Side,Right Side,18mm Melamine White,18,560,720,1,vertical,ABS 1mm,,,
+BASE-01,003,Bottom,Bottom,18mm Melamine White,18,564,560,1,horizontal,ABS 1mm,,,
+BASE-01,004,Top,Top,18mm Melamine White,18,564,560,1,horizontal,ABS 1mm,,,
+BASE-01,005,Back,Back,8mm MDF,8,600,720,1,none,,,,
+BASE-01,006,Shelf,Shelf,18mm Melamine White,18,528,540,1,horizontal,ABS 1mm,,,
+BASE-01,007,Door Left,Door,18mm Melamine Beech,18,297,700,1,vertical,ABS 1mm,ABS 1mm,ABS 1mm,ABS 1mm
+BASE-01,008,Door Right,Door,18mm Melamine Beech,18,297,700,1,vertical,ABS 1mm,ABS 1mm,ABS 1mm,ABS 1mm
+WALL-01,101,Left Side,Left Side,18mm Melamine White,18,320,700,1,vertical,ABS 1mm,,,
+WALL-01,102,Right Side,Right Side,18mm Melamine White,18,320,700,1,vertical,ABS 1mm,,,
+WALL-01,103,Bottom,Bottom,18mm Melamine White,18,564,320,1,horizontal,ABS 1mm,,,
+WALL-01,104,Top,Top,18mm Melamine White,18,564,320,1,horizontal,ABS 1mm,,,
+WALL-01,105,Back,Back,8mm MDF,8,600,700,1,none,,,,
+WALL-01,106,Shelf,Shelf,18mm Melamine White,18,528,302,2,horizontal,ABS 1mm,,,
+WALL-01,107,Door,Door,18mm Melamine Beech,18,597,696,1,horizontal,ABS 1mm,ABS 1mm,ABS 1mm,ABS 1mm
