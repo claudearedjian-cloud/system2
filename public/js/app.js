@@ -36,8 +36,30 @@ const el = {
   btnSettings: $('#btnSettings'),
 };
 
-const v2d = createViewer2D(el.viewer2d);
-const v3d = createViewer3D(el.viewer3d);
+// Viewers are created defensively: on machines without WebGL (RDP, no GPU,
+// hardware acceleration disabled) the constructor throws — we must NOT let that
+// take down the whole UI.  Everything else keeps working without the viewer.
+const NOOP_VIEWER = { setPanel() {}, setProject() {}, highlight() {}, resize() {}, dispose() {} };
+const v2d = makeViewer(createViewer2D, el.viewer2d, '2D');
+const v3d = makeViewer(createViewer3D, el.viewer3d, '3D');
+
+function makeViewer(factory, container, label) {
+  try {
+    return factory(container);
+  } catch (e) {
+    reportError(`${label} viewer unavailable (WebGL may be disabled): ${e.message}`);
+    return NOOP_VIEWER;
+  }
+}
+
+function reportError(msg) {
+  console.error('[system2]', msg);
+  const b = document.getElementById('fatalBanner');
+  if (b) {
+    b.hidden = false;
+    b.textContent = '⚠ ' + msg;
+  }
+}
 
 function setStatus(msg, kind) {
   el.statusbar.innerHTML = `<span class="dot" style="background:${kind === 'error' ? 'var(--error)' : 'var(--ok)'}"></span>${msg}`;
@@ -47,12 +69,17 @@ function setStatus(msg, kind) {
 // Bootstrap
 // ---------------------------------------------------------------------------
 async function init() {
+  bindEvents(); // attach click handlers FIRST so the UI is always responsive
   try {
     state.settings = await api('/api/settings');
     await refreshProjects();
-    bindEvents();
+    if (!state.projects.length) {
+      setStatus('UI ready — click “▶ Load sample” to load the demo kitchen.');
+    }
+    window.__appReady = true;
   } catch (e) {
     setStatus(`Startup error: ${e.message}`, 'error');
+    reportError(`Startup error: ${e.message}`);
   }
 }
 
@@ -752,4 +779,7 @@ function cssEscape(s) {
   return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
 }
 
-init();
+init().catch((e) => {
+  console.error(e);
+  reportError('Initialization failed: ' + (e && e.message ? e.message : e));
+});

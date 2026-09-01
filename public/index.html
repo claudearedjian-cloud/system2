@@ -11,6 +11,7 @@
   </script>
 </head>
 <body>
+  <div id="fatalBanner" hidden></div>
   <header class="topbar">
     <div class="brand">
       <span class="logo">◧</span>
@@ -103,6 +104,28 @@
 
   <footer class="statusbar" id="statusbar">Ready.</footer>
 
+  <script>
+    // Fail-safe diagnostics: these run even if the ES module below crashes,
+    // so a silent freeze turns into a visible message instead.
+    window.addEventListener('error', function (e) {
+      var b = document.getElementById('fatalBanner');
+      if (b) { b.hidden = false; b.textContent = '⚠ Script error: ' + (e.message || 'unknown'); }
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var b = document.getElementById('fatalBanner');
+      var r = e.reason;
+      if (b) { b.hidden = false; b.textContent = '⚠ Error: ' + (r && r.message ? r.message : String(r)); }
+    });
+    setTimeout(function () {
+      if (!window.__appReady) {
+        var b = document.getElementById('fatalBanner');
+        if (b) {
+          b.hidden = false;
+          b.innerHTML = '⚠ The app did not finish loading. Press <b>F12</b>, open the <b>Console</b> tab, and copy the red error lines here.';
+        }
+      }
+    }, 3000);
+  </script>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>
