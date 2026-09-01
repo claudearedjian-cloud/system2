@@ -36,18 +36,32 @@ const el = {
   btnSettings: $('#btnSettings'),
 };
 
-// Viewers are created defensively: on machines without WebGL (RDP, no GPU,
-// hardware acceleration disabled) the constructor throws — we must NOT let that
-// take down the whole UI.  Everything else keeps working without the viewer.
+// The 2D viewer uses plain Canvas 2D (safe everywhere) and is created eagerly.
+// The 3D viewer uses WebGL and is created LAZILY on first use: on shop PCs with
+// bad GPU drivers/RDP/hardware-acceleration-off, creating a WebGL context can
+// hang the tab rather than throw — so it must never run at startup.
 const NOOP_VIEWER = { setPanel() {}, setProject() {}, highlight() {}, resize() {}, dispose() {} };
-const v2d = makeViewer(createViewer2D, el.viewer2d, '2D');
-const v3d = makeViewer(createViewer3D, el.viewer3d, '3D');
 
-function makeViewer(factory, container, label) {
+let v2d;
+try {
+  v2d = createViewer2D(el.viewer2d);
+} catch (e) {
+  v2d = NOOP_VIEWER;
+  reportError('2D viewer unavailable: ' + (e && e.message ? e.message : e));
+}
+
+let v3d = null;
+let v3dFailed = false;
+
+function getV3d() {
+  if (v3d) return v3d;
+  if (v3dFailed) return NOOP_VIEWER;
   try {
-    return factory(container);
+    v3d = createViewer3D(el.viewer3d);
+    return v3d;
   } catch (e) {
-    reportError(`${label} viewer unavailable (WebGL may be disabled): ${e.message}`);
+    v3dFailed = true;
+    reportError('3D viewer unavailable (WebGL may be disabled on this PC). The 2D view and all other tools still work. ' + (e && e.message ? e.message : ''));
     return NOOP_VIEWER;
   }
 }
@@ -120,7 +134,7 @@ async function openProject(id) {
   renderInspector();
   el.viewerEmpty.classList.add('hidden');
   v2d.setPanel(null);
-  v3d.setProject(state.project, {});
+  if (v3d) v3d.setProject(state.project, {});
   setStatus(`Loaded “${state.project.name}” — ${state.project.stats.partInstances} part instances across ${state.project.stats.cabinets} cabinets.`);
 }
 
@@ -146,7 +160,8 @@ function renderTree() {
   showAll.style.cssText = 'margin-left:8px;';
   showAll.onclick = () => {
     state.cabinetId = null;
-    v3d.setProject(state.project, { panelId: state.panelId });
+    setMode('3d');
+    getV3d().setProject(state.project, { panelId: state.panelId });
     [...el.tree.querySelectorAll('.cab')].forEach((c) => c.classList.add('open'));
   };
   el.treeCount.after(showAll);
@@ -161,7 +176,7 @@ function renderTree() {
     row.onclick = () => {
       const open = wrap.classList.toggle('open');
       state.cabinetId = open ? cab.id : null;
-      v3d.setProject(state.project, { cabinetId: state.cabinetId, panelId: state.panelId });
+      if (v3d) v3d.setProject(state.project, { cabinetId: state.cabinetId, panelId: state.panelId });
     };
     wrap.appendChild(row);
 
@@ -191,7 +206,7 @@ function selectPanel(panelId) {
   const panel = state.project.cabinets.flatMap((c) => c.panels).find((p) => p.id === panelId);
   renderInspector();
   if (state.mode === '2d') refresh2d();
-  v3d.highlight(panelId, true);
+  if (v3d) v3d.highlight(panelId, true);
 }
 
 function refresh2d() {
@@ -281,7 +296,7 @@ function bindEvents() {
 
   el.btnFit.onclick = () => {
     if (state.mode === '2d') refresh2d();
-    else v3d.setProject(state.project, { cabinetId: state.cabinetId, panelId: state.panelId });
+    else if (v3d) v3d.setProject(state.project, { cabinetId: state.cabinetId, panelId: state.panelId });
   };
 
   el.btnImportFolder.onclick = () => el.folderInput.click();
@@ -313,7 +328,7 @@ function bindEvents() {
 
   window.addEventListener('resize', () => {
     v2d.resize();
-    v3d.resize();
+    if (v3d) v3d.resize();
   });
 }
 
@@ -385,7 +400,8 @@ function switchTab(tab) {
   if (tab === 'viewer') {
     // Re-fit after being hidden.
     requestAnimationFrame(() => {
-      v2d.resize(); v3d.resize();
+      v2d.resize();
+      if (v3d) v3d.resize();
     });
   }
   if (tab === 'validation') renderValidation();
@@ -402,8 +418,9 @@ function setMode(mode) {
   if (mode === '2d') {
     refresh2d();
   } else {
-    v3d.setProject(state.project, { cabinetId: state.cabinetId, panelId: state.panelId });
-    requestAnimationFrame(() => v3d.resize());
+    const v = getV3d();
+    v.setProject(state.project, { cabinetId: state.cabinetId, panelId: state.panelId });
+    requestAnimationFrame(() => v.resize());
   }
 }
 
