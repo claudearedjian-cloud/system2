@@ -3,7 +3,6 @@
 import { api, state, DRILL_COLORS, materialColor, fmt } from './api.js';
 import { code128 } from './code128.js';
 import { createViewer2D } from './viewer2d.js';
-import { createViewer3D } from './viewer3d.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -52,18 +51,30 @@ try {
 
 let v3d = null;
 let v3dFailed = false;
+let v3dLoading = null;
 
+/**
+ * Lazily load the WebGL 3D viewer. It is a DYNAMIC import so that the big
+ * three.module.js (and any GPU/WebGL problem it brings) can never prevent the
+ * rest of the app from starting — the 2D view, validation, CIX and BOM all
+ * work with zero GPU involvement.
+ */
 function getV3d() {
-  if (v3d) return v3d;
-  if (v3dFailed) return NOOP_VIEWER;
-  try {
-    v3d = createViewer3D(el.viewer3d);
-    return v3d;
-  } catch (e) {
-    v3dFailed = true;
-    reportError('3D viewer unavailable (WebGL may be disabled on this PC). The 2D view and all other tools still work. ' + (e && e.message ? e.message : ''));
-    return NOOP_VIEWER;
+  if (v3d) return Promise.resolve(v3d);
+  if (v3dFailed) return Promise.resolve(NOOP_VIEWER);
+  if (!v3dLoading) {
+    v3dLoading = import('./viewer3d.js')
+      .then((m) => {
+        v3d = m.createViewer3D(el.viewer3d);
+        return v3d;
+      })
+      .catch((e) => {
+        v3dFailed = true;
+        reportError('3D viewer unavailable (WebGL/GPU issue on this PC). The 2D view and all other tools still work. ' + (e && e.message ? e.message : e));
+        return NOOP_VIEWER;
+      });
   }
+  return v3dLoading;
 }
 
 function reportError(msg) {
@@ -161,7 +172,7 @@ function renderTree() {
   showAll.onclick = () => {
     state.cabinetId = null;
     setMode('3d');
-    getV3d().setProject(state.project, { panelId: state.panelId });
+    getV3d().then((v) => v.setProject(state.project, { panelId: state.panelId }));
     [...el.tree.querySelectorAll('.cab')].forEach((c) => c.classList.add('open'));
   };
   el.treeCount.after(showAll);
@@ -418,9 +429,10 @@ function setMode(mode) {
   if (mode === '2d') {
     refresh2d();
   } else {
-    const v = getV3d();
-    v.setProject(state.project, { cabinetId: state.cabinetId, panelId: state.panelId });
-    requestAnimationFrame(() => v.resize());
+    getV3d().then((v) => {
+      v.setProject(state.project, { cabinetId: state.cabinetId, panelId: state.panelId });
+      requestAnimationFrame(() => v.resize());
+    });
   }
 }
 
