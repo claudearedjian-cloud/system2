@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>system2 · Lite control panel</title>
+  <style>
+    body { font-family: Segoe UI, system-ui, Arial, sans-serif; background: #0d1419; color: #e6eef5; margin: 0; padding: 20px; }
+    h1 { font-size: 18px; margin: 0 0 4px; } h1 span { color: #2dd4bf; }
+    .muted { color: #8ba1b4; font-size: 12px; }
+    button { background: #2dd4bf; color: #04211d; border: 0; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; margin: 2px 6px 2px 0; }
+    button.ghost { background: #1d2c3a; color: #e6eef5; border: 1px solid #263849; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #263849; }
+    th { color: #8ba1b4; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+    .card { background: #182430; border: 1px solid #263849; border-radius: 8px; padding: 14px; margin: 14px 0; }
+    a { color: #2dd4bf; }
+    #log { background: #0b1218; border: 1px solid #263849; border-radius: 8px; padding: 12px; font-family: Consolas, monospace; font-size: 12px; white-space: pre-wrap; min-height: 60px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>system<span style="color:#2dd4bf">2</span> · Lite control panel</h1>
+  <div class="muted">Minimal, no-graphics version of the OPS engine. Uses the same backend as the main app.</div>
+
+  <div class="card">
+    <button onclick="loadSample()">▶ Load sample project</button>
+    <button class="ghost" onclick="loadProjects()">↻ Refresh project list</button>
+    <button class="ghost" onclick="validate()">Run pre-flight validation</button>
+    <button onclick="compile()">Compile .cix</button>
+  </div>
+
+  <div class="card">
+    <b>Project:</b>
+    <select id="projects" onchange="openProject(this.value)"><option value="">(none)</option></select>
+    <span class="muted" id="summary"></span>
+  </div>
+
+  <div class="card">
+    <b>Parts</b>
+    <table id="parts"><thead><tr><th>Part ID</th><th>Name</th><th>Cabinet</th><th>Material</th><th>Size (mm)</th><th>Qty</th><th>.cix</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="card">
+    <b>Pre-flight result</b>
+    <div id="validation" class="muted">not run yet</div>
+  </div>
+
+  <div class="card">
+    <b>Compiled .cix files</b>
+    <div id="cix" class="muted">not compiled yet</div>
+  </div>
+
+  <div id="log"></div>
+
+  <script>
+    // Deliberately plain (no ES modules, no canvas, no WebGL) so this page
+    // works even where the fancy UI cannot.
+    var projectId = null;
+    var project = null;
+
+    function log(msg) {
+      document.getElementById('log').textContent = msg;
+    }
+
+    function api(path, opts) {
+      var o = opts || {};
+      var init = { method: o.method || 'GET', headers: {} };
+      if (o.body) { init.body = JSON.stringify(o.body); init.headers['Content-Type'] = 'application/json'; }
+      return fetch(path, init).then(function (r) {
+        return r.text().then(function (t) {
+          var data = t ? JSON.parse(t) : null;
+          if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+          return data;
+        });
+      });
+    }
+
+    function loadProjects() {
+      log('Loading projects…');
+      api('/api/projects').then(function (list) {
+        var sel = document.getElementById('projects');
+        sel.innerHTML = '';
+        list.forEach(function (p) {
+          var o = document.createElement('option');
+          o.value = p.id; o.textContent = p.name + ' (' + p.stats.panels + ' parts)';
+          sel.appendChild(o);
+        });
+        log('✔ Found ' + list.length + ' project(s).');
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    function loadSample() {
+      log('Loading sample…');
+      api('/api/load-sample', { method: 'POST' }).then(function (r) {
+        projectId = r.projectId;
+        log('✔ Sample loaded. Loading project list…');
+        loadProjects();
+        openProject(r.projectId);
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    function openProject(id) {
+      if (!id) return;
+      projectId = id;
+      log('Opening project…');
+      api('/api/projects/' + encodeURIComponent(id)).then(function (p) {
+        project = p;
+        document.getElementById('summary').textContent =
+          ' — ' + p.stats.cabinets + ' cabinets, ' + p.stats.panels + ' parts, ' + p.stats.partInstances + ' instances';
+        renderParts(p);
+        log('✔ Project opened: ' + p.name);
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    function renderParts(p) {
+      var tbody = document.querySelector('#parts tbody');
+      tbody.innerHTML = '';
+      p.cabinets.forEach(function (c) {
+        c.panels.forEach(function (panel) {
+          var tr = document.createElement('tr');
+          var cells = [
+            panel.id, panel.name, c.name, panel.material,
+            panel.width + '×' + panel.height + '×' + panel.thickness, panel.qty
+          ];
+          cells.forEach(function (txt) {
+            var td = document.createElement('td');
+            td.textContent = txt;
+            tr.appendChild(td);
+          });
+          var td = document.createElement('td');
+          var a = document.createElement('a');
+          a.href = '/api/projects/' + encodeURIComponent(p.id) + '/cix/' + encodeURIComponent(panel.id);
+          a.textContent = 'download';
+          td.appendChild(a);
+          tr.appendChild(td);
+          tbody.appendChild(tr);
+        });
+      });
+    }
+
+    function validate() {
+      if (!projectId) { log('✖ Load a project first.'); return; }
+      log('Running validation…');
+      api('/api/projects/' + encodeURIComponent(projectId) + '/validation').then(function (r) {
+        var host = document.getElementById('validation');
+        if (r.ok) {
+          host.innerHTML = '<b style="color:#3ecf8e">PASS</b> — ' + r.warningCount + ' warning(s).';
+        } else {
+          host.innerHTML = '<b style="color:#ef5350">BLOCKED</b> — ' + r.errorCount + ' error(s), ' + r.warningCount + ' warning(s).';
+        }
+        var list = r.issues.map(function (i) {
+          return '• [' + i.severity + '] ' + i.panelId + ': ' + i.message;
+        }).join('<br>');
+        host.innerHTML += '<br>' + (list || '<span class="muted">no issues</span>');
+        log('✔ Validation complete.');
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    function compile() {
+      if (!projectId) { log('✖ Load a project first.'); return; }
+      log('Compiling .cix…');
+      api('/api/projects/' + encodeURIComponent(projectId) + '/compile', { method: 'POST', body: {} }).then(function (r) {
+        var host = document.getElementById('cix');
+        if (r.blocked) {
+          host.innerHTML = '<b style="color:#ef5350">Blocked by validation errors.</b>';
+        } else {
+          host.innerHTML = '<b style="color:#3ecf8e">' + r.files.length + ' file(s) compiled.</b><br>';
+          host.innerHTML += r.files.map(function (f) {
+            return '<a href="/api/projects/' + encodeURIComponent(projectId) + '/cix/' + encodeURIComponent(f.name) + '">' + f.name + '</a>';
+          }).join('<br>');
+        }
+        log('✔ Compilation done.');
+      }).catch(function (e) { log('✖ ' + e.message); });
+    }
+
+    loadProjects();
+  </script>
+</body>
+</html>
