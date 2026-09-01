@@ -11,7 +11,6 @@ mkdirSync(vendorDir, { recursive: true });
 
 const files = [
   ['node_modules/three/build/three.module.js', 'public/vendor/three.module.js'],
-  ['node_modules/three/examples/jsm/controls/OrbitControls.js', 'public/vendor/OrbitControls.js'],
 ];
 
 for (const [src, dst] of files) {

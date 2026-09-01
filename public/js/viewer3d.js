@@ -1,8 +1,10 @@
 // 3D assembly previewer: extrudes each panel outline and places it in cabinet
-// space using the placement basis computed at import time.  OrbitControls give
-// rotate / pan / zoom.
+// space using the placement basis computed at import time.
+//
+// NOTE: this file deliberately uses NO import map and NO bare-module specifiers.
+// It only imports Three.js via an absolute path, and implements its own small
+// orbit controls, so it loads on the widest possible range of browsers.
 import * as THREE from '/vendor/three.module.js';
-import { OrbitControls } from '/vendor/OrbitControls.js';
 import { materialColor, DRILL_COLORS } from './api.js';
 
 export function createViewer3D(container) {
@@ -11,27 +13,19 @@ export function createViewer3D(container) {
   scene.fog = new THREE.Fog(0x0b1218, 3000, 8000);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   container.appendChild(renderer.domElement);
 
   const camera = new THREE.PerspectiveCamera(50, 1, 1, 20000);
   camera.position.set(900, 700, 1400);
+  camera.up.set(0, 1, 0);
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-  controls.target.set(300, 360, 280);
+  const controls = createOrbitControls(camera, renderer.domElement);
 
   // Lights.
   scene.add(new THREE.AmbientLight(0x8899aa, 1.4));
   const key = new THREE.DirectionalLight(0xffffff, 2.2);
   key.position.set(1000, 1800, 1200);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.left = -2500; key.shadow.camera.right = 2500;
-  key.shadow.camera.top = 2500; key.shadow.camera.bottom = -2500;
   scene.add(key);
   const rim = new THREE.DirectionalLight(0x9fc9ff, 0.8);
   rim.position.set(-800, 400, -600);
@@ -44,12 +38,12 @@ export function createViewer3D(container) {
   const root = new THREE.Group();
   scene.add(root);
 
-  const panelMeshes = new Map(); // panelId -> { group, materials }
+  const panelMeshes = new Map(); // panelId -> group
 
   function clear() {
-    for (const [, entry] of panelMeshes) {
-      root.remove(entry.group);
-      disposeGroup(entry.group);
+    for (const [, group] of panelMeshes) {
+      root.remove(group);
+      disposeGroup(group);
     }
     panelMeshes.clear();
   }
@@ -57,76 +51,70 @@ export function createViewer3D(container) {
   function disposeGroup(g) {
     g.traverse((obj) => {
       if (obj.isMesh) {
-        obj.geometry?.dispose();
+        if (obj.geometry) obj.geometry.dispose();
         if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
-        else obj.material?.dispose();
+        else if (obj.material) obj.material.dispose();
       }
     });
   }
 
   function basisMatrix(placement) {
-    const [ox, oy, oz] = placement.origin;
-    const u = new THREE.Vector3(...placement.uAxis);
-    const v = new THREE.Vector3(...placement.vAxis);
-    const t = new THREE.Vector3(...placement.thicknessAxis);
-    return new THREE.Matrix4().makeBasis(u, v, t).setPosition(ox, oy, oz);
+    const u = new THREE.Vector3().fromArray(placement.uAxis);
+    const v = new THREE.Vector3().fromArray(placement.vAxis);
+    const t = new THREE.Vector3().fromArray(placement.thicknessAxis);
+    return new THREE.Matrix4().makeBasis(u, v, t).setPosition(
+      placement.origin[0], placement.origin[1], placement.origin[2],
+    );
   }
 
-  function buildPanelMesh(panel, placement, offset) {
+  function buildPanelMesh(panel, placement, offsetX) {
     const g = new THREE.Group();
 
-    // Extrude outline by thickness along local Z.
     const shape = new THREE.Shape();
-    const pts = panel.outline?.length ? panel.outline : rect(panel.width, panel.height);
+    const pts = panel.outline && panel.outline.length ? panel.outline : rect(panel.width, panel.height);
     shape.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i].x, pts[i].y);
     shape.closePath();
 
     const depth = panel.thickness || 18;
-    const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: depth, bevelEnabled: false });
     const color = new THREE.Color(materialColor(panel.material));
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05 });
+    const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.55, metalness: 0.05 });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
     mesh.userData.panelId = panel.id;
     g.add(mesh);
 
-    // Crisp edges.
     const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(geo, 15),
       new THREE.LineBasicMaterial({ color: 0x101a22, transparent: true, opacity: 0.7 }),
     );
     g.add(edges);
 
-    // Drillings as small cylinders on the top face (local Z + offset).
-    for (const d of panel.drillings ?? []) {
+    for (const d of panel.drillings || []) {
       const radius = Math.max((d.diameter || 5) / 2, 1);
       const len = Math.max(d.depth || panel.thickness || 10, 2);
       const cyl = new THREE.Mesh(
-        new THREE.CylinderGeometry(radius, radius, len, 24),
-        new THREE.MeshStandardMaterial({ color: DRILL_COLORS[d.face] ?? '#fff', roughness: 0.3, metalness: 0.3 }),
+        new THREE.CylinderGeometry(radius, radius, len, 20),
+        new THREE.MeshStandardMaterial({ color: DRILL_COLORS[d.face] || '#ffffff', roughness: 0.3, metalness: 0.3 }),
       );
       const z = d.face === 'bottom' ? -len / 2 : depth + len / 2;
       cyl.position.set(d.x, d.y, z);
-      if (d.face === 'bottom') cyl.rotation.x = Math.PI;
       g.add(cyl);
     }
 
-    // Edge banding tint along the panel perimeter (visual only).
-    if (panel.edgeband?.length) {
+    if (panel.edgeband && panel.edgeband.length) {
       const bandMat = new THREE.MeshStandardMaterial({ color: 0x5b6b78, roughness: 0.4 });
       const t = Math.max(depth * 0.08, 1);
       for (const e of panel.edgeband) {
         const box = edgeBox(e.edge, panel.width, panel.height, depth, t);
-        const b = new THREE.Mesh(new THREE.BoxGeometry(...box.size), bandMat);
-        b.position.set(...box.pos);
+        const b = new THREE.Mesh(new THREE.BoxGeometry(box.size[0], box.size[1], box.size[2]), bandMat);
+        b.position.set(box.pos[0], box.pos[1], box.pos[2]);
         g.add(b);
       }
     }
 
     g.applyMatrix4(basisMatrix(placement));
-    g.position.add(new THREE.Vector3(offset.x, 0, 0));
+    g.position.x += offsetX;
     return g;
   }
 
@@ -138,12 +126,13 @@ export function createViewer3D(container) {
     return { size: [0, 0, 0], pos: [0, 0, 0] };
   }
 
-  function setProject(project, { cabinetId, panelId }) {
+  function setProject(project, opts) {
+    const options = opts || {};
     clear();
     if (!project) { renderer.render(scene, camera); return; }
 
-    const cabinets = cabinetId
-      ? project.cabinets.filter((c) => c.id === cabinetId)
+    const cabinets = options.cabinetId
+      ? project.cabinets.filter((c) => c.id === options.cabinetId)
       : project.cabinets;
 
     let offsetX = 0;
@@ -152,18 +141,18 @@ export function createViewer3D(container) {
 
     for (const cab of cabinets) {
       const byPanel = new Map(cab.placements.map((pl) => [pl.panelId, pl]));
+      let cabWidth = 0;
       for (const panel of cab.panels) {
         const pl = byPanel.get(panel.id);
         if (!pl) continue;
-        const g = buildPanelMesh(panel, pl, { x: offsetX });
+        const g = buildPanelMesh(panel, pl, offsetX);
         root.add(g);
-        panelMeshes.set(panel.id, { group: g, baseColor: materialColor(panel.material) });
+        panelMeshes.set(panel.id, g);
         const bb = new THREE.Box3().setFromObject(g);
         total.union(bb);
+        cabWidth = Math.max(cabWidth, panel.width);
         any = true;
       }
-      // Space cabinets apart.
-      const cabWidth = maxExtent(cab, 'x');
       offsetX += cabWidth + 180;
     }
 
@@ -176,31 +165,19 @@ export function createViewer3D(container) {
       camera.near = Math.max(dist / 1000, 0.1);
       camera.far = dist * 20;
       camera.updateProjectionMatrix();
+      controls.sync();
     }
 
-    if (panelId) highlight(panelId, true);
+    if (options.panelId) highlight(options.panelId, true);
     renderer.render(scene, camera);
   }
 
-  function maxExtent(cab, axis) {
-    let m = 0;
-    for (const pl of cab.placements) {
-      const p = cab.panels.find((pp) => pp.id === pl.panelId);
-      if (!p) continue;
-      if (axis === 'x') m = Math.max(m, p.width);
-      if (axis === 'y') m = Math.max(m, p.height);
-      if (axis === 'z') m = Math.max(m, p.height);
-    }
-    return m;
-  }
-
   function highlight(panelId, on) {
-    const entry = panelMeshes.get(panelId);
-    if (!entry) return;
-    entry.group.traverse((obj) => {
-      if (obj.isMesh && obj.material?.color && obj.material?.type !== 'LineBasicMaterial') {
-        obj.material.emissive = new THREE.Color(on ? 0x2dd4bf : 0x000000);
-        obj.material.emissiveIntensity = on ? 0.55 : 0;
+    const group = panelMeshes.get(panelId);
+    if (!group) return;
+    group.traverse((obj) => {
+      if (obj.isMesh && obj.material && obj.material.emissive) {
+        obj.material.emissive.set(on ? 0x2dd4bf : 0x000000);
       }
     });
     renderer.render(scene, camera);
@@ -212,27 +189,123 @@ export function createViewer3D(container) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
   }
-
-  let raf = null;
-  function animate() {
-    raf = requestAnimationFrame(animate);
-    if (container.clientWidth > 0 && container.clientHeight > 0) {
-      controls.update();
-      renderer.render(scene, camera);
-    }
-  }
-  animate();
 
   function dispose() {
-    cancelAnimationFrame(raf);
     clear();
     controls.dispose();
     renderer.dispose();
-    renderer.domElement.remove();
+    if (renderer.domElement && renderer.domElement.parentNode) {
+      renderer.domElement.parentNode.removeChild(renderer.domElement);
+    }
   }
 
   return { setProject, highlight, resize, dispose };
+}
+
+// ---------------------------------------------------------------------------
+// Minimal self-contained orbit controls (rotate / pan / zoom).
+// ---------------------------------------------------------------------------
+function createOrbitControls(camera, dom) {
+  const target = new THREE.Vector3(300, 360, 280);
+  const offset = new THREE.Vector3();
+  let radius = 1000;
+  let theta = 0;
+  let phi = Math.PI / 3;
+
+  const MIN_POLAR = 0.05;
+  const MAX_POLAR = Math.PI - 0.05;
+  const ROTATE_SPEED = 0.005;
+  const ZOOM_SPEED = 0.001;
+
+  function sync() {
+    offset.copy(camera.position).sub(target);
+    radius = Math.max(offset.length(), 1);
+    theta = Math.atan2(offset.x, offset.z);
+    phi = Math.acos(THREE.MathUtils.clamp(offset.y / radius, -1, 1));
+  }
+
+  function update() {
+    const sinPhi = Math.sin(phi);
+    camera.position.set(
+      target.x + radius * sinPhi * Math.sin(theta),
+      target.y + radius * Math.cos(phi),
+      target.z + radius * sinPhi * Math.cos(theta),
+    );
+    camera.lookAt(target);
+  }
+
+  let dragging = false;
+  let button = -1;
+  let lastX = 0;
+  let lastY = 0;
+
+  const onPointerDown = (e) => {
+    dragging = true;
+    button = e.button;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    if (dom.setPointerCapture) { try { dom.setPointerCapture(e.pointerId); } catch (err) {} }
+  };
+
+  const onPointerMove = (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+
+    if (button === 0) { // rotate
+      theta -= dx * ROTATE_SPEED;
+      phi -= dy * ROTATE_SPEED;
+      phi = THREE.MathUtils.clamp(phi, MIN_POLAR, MAX_POLAR);
+    } else { // pan
+      const panScale = radius * 0.0012;
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir);
+      const right = new THREE.Vector3().crossVectors(dir, camera.up).normalize();
+      const up = camera.up.clone();
+      target.addScaledVector(right, -dx * panScale);
+      target.addScaledVector(up, dy * panScale);
+    }
+    update();
+  };
+
+  const onPointerUp = () => { dragging = false; button = -1; };
+
+  const onWheel = (e) => {
+    e.preventDefault();
+    radius *= 1 + e.deltaY * ZOOM_SPEED;
+    radius = THREE.MathUtils.clamp(radius, 20, 20000);
+    update();
+  };
+
+  const onContextMenu = (e) => e.preventDefault();
+
+  dom.addEventListener('pointerdown', onPointerDown);
+  dom.addEventListener('pointermove', onPointerMove);
+  dom.addEventListener('pointerup', onPointerUp);
+  dom.addEventListener('pointercancel', onPointerUp);
+  dom.addEventListener('wheel', onWheel, { passive: false });
+  dom.addEventListener('contextmenu', onContextMenu);
+
+  sync();
+  update();
+
+  return {
+    target,
+    sync,
+    update,
+    dispose() {
+      dom.removeEventListener('pointerdown', onPointerDown);
+      dom.removeEventListener('pointermove', onPointerMove);
+      dom.removeEventListener('pointerup', onPointerUp);
+      dom.removeEventListener('pointercancel', onPointerUp);
+      dom.removeEventListener('wheel', onWheel);
+      dom.removeEventListener('contextmenu', onContextMenu);
+    },
+  };
 }
 
 function rect(w, h) {

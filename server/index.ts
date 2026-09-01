@@ -116,7 +116,14 @@ function serveStatic(res: ServerResponse, pathname: string) {
   fs.readFile(filePath)
     .then((buf) => {
       const ext = extname(filePath).toLowerCase();
-      res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream' });
+      // Dev tool: never let the browser cache frontend assets, otherwise
+      // operators keep seeing a stale UI after updates.
+      const noCache = ['.html', '.js', '.mjs', '.css', '.json'].includes(ext);
+      const headers: Record<string, string> = {
+        'Content-Type': MIME[ext] ?? 'application/octet-stream',
+      };
+      if (noCache) headers['Cache-Control'] = 'no-store, no-cache, must-revalidate';
+      res.writeHead(200, headers);
       res.end(buf);
     })
     .catch(() => {
