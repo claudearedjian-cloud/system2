@@ -784,7 +784,12 @@ function renderCabinetSelector() {
   const sel = document.getElementById('assemblyCabinetSelect');
   if (!sel) return;
   sel.innerHTML = '';
-  if (!state.project) return;
+  if (!state.project || !state.project.cabinets || !state.project.cabinets.length) {
+    const opt = document.createElement('option');
+    opt.textContent = '— No Cabinets —';
+    sel.appendChild(opt);
+    return;
+  }
 
   for (const cab of state.project.cabinets) {
     const opt = document.createElement('option');
@@ -796,30 +801,47 @@ function renderCabinetSelector() {
 }
 
 function renderAssemblyStation() {
-  if (!state.project || !activeCabinet) return;
+  const cabBadge = document.getElementById('assemblyCabBadge');
+  const progLabel = document.getElementById('assemblyProgressLabel');
+  const progBar = document.getElementById('assemblyProgressBar');
+  const statusTag = document.getElementById('assemblyStatusTag');
+  const list = document.getElementById('assemblyPartsList');
+  const banner = document.getElementById('assemblyActiveBanner');
+  const bannerName = document.getElementById('activePartName');
+
+  // Handle empty state (e.g. after Clear / Reset)
+  if (!state.project || !activeCabinet) {
+    if (cabBadge) cabBadge.textContent = '—';
+    if (progLabel) progLabel.textContent = 'Assembly Progress: 0 / 0 Parts (0%)';
+    if (progBar) progBar.style.width = '0%';
+    if (statusTag) {
+      statusTag.textContent = 'No Batch';
+      statusTag.className = 'chip';
+    }
+    if (list) {
+      list.innerHTML = '<div class="empty-hint" style="position:relative; padding:32px 16px; text-align:center;">No cabinet parts loaded.<br><small class="muted">Click <b>▶ Sample</b> or <b>📁 Choose Folder</b> to load parts.</small></div>';
+    }
+    if (banner) banner.classList.add('hidden');
+    renderHardwareDetailPanel();
+    return;
+  }
 
   // 1. Update Cabinet Badge & Progress
-  const cabBadge = document.getElementById('assemblyCabBadge');
   if (cabBadge) cabBadge.textContent = activeCabinet.name;
 
   const totalParts = activeCabinet.panels.reduce((sum, p) => sum + p.qty, 0);
   const stagedParts = activeCabinet.panels.reduce((sum, p) => sum + (p.status === 'staged' || p.status === 'assembled' ? p.qty : 0), 0);
   const percent = totalParts > 0 ? Math.round((stagedParts / totalParts) * 100) : 0;
 
-  const progLabel = document.getElementById('assemblyProgressLabel');
   if (progLabel) progLabel.textContent = `Assembly Progress: ${stagedParts} / ${totalParts} Parts (${percent}%)`;
-
-  const progBar = document.getElementById('assemblyProgressBar');
   if (progBar) progBar.style.width = `${percent}%`;
 
-  const statusTag = document.getElementById('assemblyStatusTag');
   if (statusTag) {
     statusTag.textContent = percent === 100 ? '✔ Fully Staged' : `${percent}% Ready`;
     statusTag.className = percent === 100 ? 'chip ok' : 'chip warn';
   }
 
   // 2. Render Left Panel Parts Checklist
-  const list = document.getElementById('assemblyPartsList');
   if (list) {
     list.innerHTML = '';
     for (const p of activeCabinet.panels) {
@@ -862,8 +884,6 @@ function renderAssemblyStation() {
   }
 
   // 3. Active Panel Banner & Highlighting
-  const banner = document.getElementById('assemblyActiveBanner');
-  const bannerName = document.getElementById('activePartName');
   if (activePanel && banner && bannerName) {
     banner.classList.remove('hidden');
     bannerName.textContent = `${activePanel.name} (${activePanel.partCode || activePanel.id})`;
@@ -1021,10 +1041,18 @@ async function updatePartStatus(panelId, status, station) {
 // Module B: CNC Operator Station (Biesse Rover A)
 // ---------------------------------------------------------------------------
 function renderCncStation() {
-  if (!state.project) return;
   const queue = document.getElementById('cncPartQueue');
-  if (!queue) return;
+  const cncTitle = document.getElementById('cncActivePartTitle');
 
+  if (!state.project) {
+    if (queue) queue.innerHTML = '<div class="empty-hint" style="position:relative; padding:32px 16px; text-align:center;">CNC Queue is empty.</div>';
+    if (cncTitle) cncTitle.textContent = 'Select a part to preview machining';
+    if (v2dCnc) v2dCnc.setPanel(null);
+    loadActiveCixCode();
+    return;
+  }
+
+  if (!queue) return;
   queue.innerHTML = '';
   const allPanels = state.project.cabinets.flatMap((c) => c.panels);
 
@@ -1048,7 +1076,6 @@ function renderCncStation() {
     queue.appendChild(card);
   }
 
-  const cncTitle = document.getElementById('cncActivePartTitle');
   if (activePanel && cncTitle) {
     cncTitle.textContent = `${activePanel.name} (${activePanel.partCode}) — Pod-and-Rail Setup`;
   }
@@ -1081,24 +1108,33 @@ async function loadActiveCixCode() {
 // Module A: Cut Rite & Beam Saw Station
 // ---------------------------------------------------------------------------
 function renderSawStation() {
-  if (!state.project) return;
-
   const btnCsv = document.getElementById('btnDownloadCutRiteCsv');
+  const countTag = document.getElementById('cutRitePartCount');
+  const syncStat = document.getElementById('syncStatText');
+  const tbody = document.getElementById('cutRiteTableBody');
+  const labelsGrid = document.getElementById('sawLabelsGrid');
+
+  if (!state.project) {
+    if (btnCsv) btnCsv.href = '#';
+    if (countTag) countTag.textContent = '0 parts';
+    if (syncStat) syncStat.textContent = 'No active manufacturing batch loaded.';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="14" style="text-align:center; color:var(--text-dim); padding:24px;">No parts in table. Import a Polyboard folder to optimize cutting.</td></tr>';
+    if (labelsGrid) labelsGrid.innerHTML = '<div class="empty-hint" style="position:relative; padding:32px 16px; text-align:center;">No part labels available.</div>';
+    return;
+  }
+
   if (btnCsv) {
     btnCsv.href = `/api/projects/${encodeURIComponent(state.project.id)}/cutrite.csv`;
   }
 
   const allPanels = state.project.cabinets.flatMap((c) => c.panels);
-  const countTag = document.getElementById('cutRitePartCount');
   if (countTag) countTag.textContent = `${allPanels.length} synchronized parts`;
 
-  const syncStat = document.getElementById('syncStatText');
   if (syncStat) {
     syncStat.textContent = `${allPanels.length} of ${allPanels.length} parts have 100% synchronized Part Codes, Barcodes, and bSolid .cix file names.`;
   }
 
   // Render Table
-  const tbody = document.getElementById('cutRiteTableBody');
   if (tbody) {
     tbody.innerHTML = '';
     for (const p of allPanels) {
@@ -1129,7 +1165,6 @@ function renderSawStation() {
   }
 
   // Render Barcode Labels
-  const labelsGrid = document.getElementById('sawLabelsGrid');
   if (labelsGrid) {
     labelsGrid.innerHTML = '';
     for (const p of allPanels) {
