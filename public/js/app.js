@@ -78,6 +78,7 @@ function switchStation(stationName) {
   document.querySelectorAll('.station-tab').forEach((tab) => {
     tab.classList.toggle('active', tab.dataset.station === stationName);
   });
+<<<<<<< HEAD
 
   const views = {
     assembly: document.getElementById('view-assembly'),
@@ -267,6 +268,299 @@ async function distributeLan() {
       method: 'POST',
       body: JSON.stringify({ settings: state.settings }),
     });
+=======
+
+  const views = {
+    assembly: document.getElementById('view-assembly'),
+    cnc: document.getElementById('view-cnc'),
+    saw: document.getElementById('view-saw'),
+    cam: document.getElementById('view-cam'),
+  };
+
+  for (const [key, dom] of Object.entries(views)) {
+    if (dom) {
+      dom.classList.toggle('hidden', key !== stationName);
+      dom.classList.toggle('active', key === stationName);
+    }
+  }
+
+  requestAnimationFrame(() => {
+    if (stationName === 'assembly') getV3d().then((v) => v.resize());
+    if (stationName === 'cnc' && v2dCnc) v2dCnc.resize();
+    if (stationName === 'cam' && v2dCam) v2dCam.resize();
+  });
+}
+
+function switchCamTab(tabName) {
+  document.querySelectorAll('.cam-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.camTab === tabName);
+  });
+  const panels = {
+    import: document.getElementById('campanel-import'),
+    preflight: document.getElementById('campanel-preflight'),
+    cad2d: document.getElementById('campanel-cad2d'),
+    settings: document.getElementById('campanel-settings'),
+  };
+  for (const [key, dom] of Object.entries(panels)) {
+    if (dom) dom.classList.toggle('hidden', key !== tabName);
+  }
+  if (tabName === 'cad2d' && v2dCam) {
+    requestAnimationFrame(() => v2dCam.resize());
+  }
+}
+
+function toggleAudio() {
+  soundEnabled = !soundEnabled;
+  const btn = document.getElementById('btnAudioToggle');
+  if (btn) btn.textContent = soundEnabled ? '🔊 Sound' : '🔇 Muted';
+  if (soundEnabled) playSuccessChime();
+}
+
+function openSettings() {
+  switchStation('cam');
+  switchCamTab('settings');
+}
+
+async function loadDemoKitchen() {
+  try {
+    setStatus('Loading demo Polyboard kitchen batch…');
+    const res = await api('/api/load-sample', { method: 'POST' });
+    await refreshProjects();
+    if (res && res.project) {
+      await openProject(res.project.id);
+    }
+    if (soundEnabled) playSuccessChime();
+    showScanToast('Demo Kitchen Loaded', 'Imported BASE-01 and WALL-01 cabinets.', 'ok');
+    setStatus('✔ Kitchen Demo batch loaded successfully.', 'ok');
+  } catch (e) {
+    setStatus(`Failed to load demo: ${e.message}`, 'error');
+  }
+}
+
+async function clearAllData() {
+  if (!confirm('Clear all loaded cabinets and parts to import a new folder?')) return;
+  try {
+    setStatus('Clearing all workspace data…');
+    await api('/api/clear', { method: 'POST' });
+    state.projects = [];
+    state.project = null;
+    activeCabinet = null;
+    activePanel = null;
+
+    renderProjectPicker();
+    renderCabinetSelector();
+    renderAssemblyStation();
+    renderCncStation();
+    renderSawStation();
+    renderQuickScanPills();
+
+    getV3d().then((v3d) => {
+      v3d.setProject(null);
+    });
+
+    if (v2dCnc) v2dCnc.setPanel(null);
+    if (v2dCam) v2dCam.setPanel(null);
+
+    const emptyHint = document.getElementById('assemblyEmptyHint');
+    if (emptyHint) {
+      emptyHint.classList.remove('hidden');
+      emptyHint.innerHTML = `
+        <div style="font-size:32px; margin-bottom:8px">📁</div>
+        <div style="font-weight:700; font-size:14px; color:var(--text); margin-bottom:4px">Workspace is Empty</div>
+        <div style="font-size:12px; max-width:340px; margin:0 auto; line-height:1.4">
+          Click <b>📁 Choose Folder</b> in the CAM tab or drag and drop your Polyboard export folder here.
+        </div>
+      `;
+    }
+
+    const banner = document.getElementById('assemblyActiveBanner');
+    if (banner) banner.classList.add('hidden');
+
+    switchStation('cam');
+    switchCamTab('import');
+
+    const statusEl = document.getElementById('camImportStatus');
+    if (statusEl) {
+      statusEl.textContent = 'Workspace cleared. Ready to import new Polyboard folder.';
+      statusEl.className = 'import-status ok';
+    }
+
+    showScanToast('Workspace Cleared', 'Ready to import new Polyboard folder.', 'ok');
+    setStatus('Workspace cleared — Select or drag-and-drop a new Polyboard folder.', 'ok');
+  } catch (e) {
+    setStatus(`Failed to clear: ${e.message}`, 'error');
+  }
+}
+
+async function handleBatchUpload(files, folderMode = false) {
+  if (!files || !files.length) return;
+  const statusEl = document.getElementById('camImportStatus');
+  if (statusEl) {
+    statusEl.textContent = `Reading ${files.length} Polyboard files…`;
+    statusEl.className = 'import-status';
+  }
+  setStatus(`Uploading & parsing ${files.length} files…`);
+
+  try {
+    const list = [];
+    for (const f of files) {
+      const content = await f.text();
+      list.push({
+        name: folderMode ? (f.webkitRelativePath || f.name) : f.name,
+        content,
+      });
+    }
+
+    const folderName = folderMode && files[0].webkitRelativePath
+      ? files[0].webkitRelativePath.split('/')[0]
+      : `Batch ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+    const result = await api('/api/import', {
+      method: 'POST',
+      body: JSON.stringify({ name: folderName, files: list }),
+    });
+
+    if (statusEl) {
+      statusEl.textContent = `✔ Successfully imported ${result.project.stats.panels} parts across ${result.project.stats.cabinets} cabinets.`;
+      statusEl.className = 'import-status ok';
+    }
+
+    await refreshProjects();
+    await openProject(result.projectId);
+    switchStation('assembly');
+    showScanToast('Import Successful', `Loaded ${result.project.stats.cabinets} cabinets (${result.project.stats.panels} parts).`, 'ok');
+    setStatus(`✔ Imported batch: ${result.project.name}`, 'ok');
+  } catch (e) {
+    if (statusEl) {
+      statusEl.textContent = `✖ Import failed: ${e.message}`;
+      statusEl.className = 'import-status error';
+    }
+    setStatus(`Import failed: ${e.message}`, 'error');
+  }
+}
+
+async function triggerManualScan() {
+  const input = document.getElementById('barcodeManualInput');
+  if (input && input.value) {
+    const code = input.value.trim();
+    input.value = '';
+    await handleBarcodeScan(code, activeStation);
+  }
+}
+
+async function quickScan(barcode) {
+  await handleBarcodeScan(barcode, activeStation);
+}
+
+function onCabinetChange(cabId) {
+  if (!state.project) return;
+  activeCabinet = state.project.cabinets.find((c) => c.id === cabId) || activeCabinet;
+  if (activeCabinet && activeCabinet.panels.length > 0) {
+    activePanel = activeCabinet.panels[0];
+  }
+  renderAssemblyStation();
+  getV3d().then((v3d) => {
+    v3d.setProject(state.project, {
+      cabinetId: activeCabinet ? activeCabinet.id : undefined,
+      panelId: activePanel ? activePanel.id : undefined,
+    });
+  });
+}
+
+function onProjectChange(projId) {
+  if (projId) openProject(projId);
+}
+
+function selectPanel(panelId, sourceStation = activeStation) {
+  if (!state.project) return;
+  for (const cab of state.project.cabinets) {
+    const p = cab.panels.find((x) => x.id === panelId || x.partCode === panelId);
+    if (p) {
+      activeCabinet = cab;
+      activePanel = p;
+      break;
+    }
+  }
+
+  renderCabinetSelector();
+  renderAssemblyStation();
+  renderCncStation();
+
+  getV3d().then((v3d) => {
+    v3d.highlight(activePanel ? activePanel.id : null, true);
+  });
+
+  if (v2dCnc && activePanel) {
+    v2dCnc.setPanel(activePanel);
+  }
+  if (v2dCam && activePanel) {
+    updateCad2dLayers();
+  }
+}
+
+function fit3d() {
+  getV3d().then((v3d) => v3d.resetView());
+}
+
+function fullBatch3d() {
+  getV3d().then((v3d) => v3d.setProject(state.project, {}));
+}
+
+function onExplodeChange(val) {
+  const factor = Number(val) / 100;
+  const txt = document.getElementById('explodeVal');
+  if (txt) txt.textContent = `${val}%`;
+  getV3d().then((v3d) => v3d.setExplode(factor));
+}
+
+function onGhostChange(checked) {
+  getV3d().then((v3d) => v3d.setGhostMode(checked));
+}
+
+async function stageCurrentPanel() {
+  if (activePanel) {
+    await togglePartStageStatus(activePanel);
+  }
+}
+
+async function togglePartStage(panelId) {
+  if (!state.project) return;
+  const panel = state.project.cabinets.flatMap((c) => c.panels).find((p) => p.id === panelId);
+  if (panel) {
+    await togglePartStageStatus(panel);
+  }
+}
+
+async function markCurrentCabAssembled() {
+  if (!activeCabinet || !state.project) return;
+  for (const p of activeCabinet.panels) {
+    await updatePartStatus(p.id, 'staged', 'assembly');
+  }
+  if (soundEnabled) playStageChime();
+  showScanToast(`Cabinet ${activeCabinet.name} Staged`, `All ${activeCabinet.panels.length} parts ready for assembly.`, 'ok');
+}
+
+async function resetTracking() {
+  if (!state.project) return;
+  if (confirm('Reset tracking status for all parts in this project?')) {
+    await api(`/api/projects/${encodeURIComponent(state.project.id)}/reset-status`, { method: 'POST' });
+    state.project = await api(`/api/projects/${encodeURIComponent(state.project.id)}`);
+    renderAssemblyStation();
+    renderCncStation();
+    renderSawStation();
+    showScanToast('Tracking Reset', 'All parts reset to pending_cut.', 'ok');
+  }
+}
+
+async function distributeLan() {
+  if (!state.project) return;
+  try {
+    setStatus('Pushing compiled CIX batch to Rover A LAN directory…');
+    const res = await api(`/api/projects/${encodeURIComponent(state.project.id)}/distribute`, {
+      method: 'POST',
+      body: JSON.stringify({ settings: state.settings }),
+    });
+>>>>>>> c61f1af (feat: add Clear / New Batch button to reset workspace and import new Polyboard folder)
     if (res.ok) {
       showScanToast('LAN Drop Successful', `Pushed ${res.files.length} .cix programs to Rover A.`, 'ok');
       setStatus(`✔ Successfully pushed ${res.files.length} .cix files over LAN.`, 'ok');
@@ -336,6 +630,11 @@ window.system2 = {
   toggleAudio,
   openSettings,
   loadDemoKitchen,
+<<<<<<< HEAD
+=======
+  clearAllData,
+  handleBatchUpload,
+>>>>>>> c61f1af (feat: add Clear / New Batch button to reset workspace and import new Polyboard folder)
   triggerManualScan,
   quickScan,
   onCabinetChange,
@@ -361,6 +660,10 @@ window.system2 = {
 
 window.switchStation = switchStation;
 window.loadDemoKitchen = loadDemoKitchen;
+<<<<<<< HEAD
+=======
+window.clearAllData = clearAllData;
+>>>>>>> c61f1af (feat: add Clear / New Batch button to reset workspace and import new Polyboard folder)
 
 // ---------------------------------------------------------------------------
 // Bootstrap & Initialization
@@ -467,6 +770,48 @@ function bindGlobalDelegation() {
       }
     });
   }
+<<<<<<< HEAD
+=======
+
+  // File and Folder Import Inputs
+  const fileInput = document.getElementById('fileInputMain');
+  if (fileInput) {
+    fileInput.addEventListener('change', async () => {
+      if (fileInput.files && fileInput.files.length) {
+        await handleBatchUpload([...fileInput.files], false);
+        fileInput.value = '';
+      }
+    });
+  }
+
+  const folderInput = document.getElementById('folderInputMain');
+  if (folderInput) {
+    folderInput.addEventListener('change', async () => {
+      if (folderInput.files && folderInput.files.length) {
+        await handleBatchUpload([...folderInput.files], true);
+        folderInput.value = '';
+      }
+    });
+  }
+
+  // Drag & Drop
+  const dropzone = document.getElementById('dropzoneMain');
+  if (dropzone) {
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('drag');
+    });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+    dropzone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('drag');
+      const files = [...(e.dataTransfer?.files || [])];
+      if (files.length) {
+        await handleBatchUpload(files, false);
+      }
+    });
+  }
+>>>>>>> c61f1af (feat: add Clear / New Batch button to reset workspace and import new Polyboard folder)
 }
 
 // ---------------------------------------------------------------------------

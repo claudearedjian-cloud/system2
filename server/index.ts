@@ -432,6 +432,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, url: URL) {
       return json(res, 200, { projectId: project.id, project, unmatched });
     }
 
+    if ((pathname === '/api/clear' || pathname === '/api/projects/clear') && method === 'POST') {
+      projects.clear();
+      saveState();
+      return json(res, 200, { ok: true, message: 'All projects cleared.' });
+    }
+
     if (pathname === '/api/import-folder' && method === 'POST') {
       const body = JSON.parse(await readBody(req));
       const folder = body.folder;
