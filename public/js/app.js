@@ -1,5 +1,6 @@
 // system2 — Woodworking Operations Engine (Polyboard -> Cut Rite / bSolid Pipeline)
-// Exposes window.system2 global controller for unbreakable inline & delegated interactivity.
+// Unified Controller for Station Modes, Barcode Scanning, 3D/2D Highlighting,
+// Cabinet Assembly Checklist, Hardware Graphics, CNC Setup, and Cut Rite CSV.
 
 import { api, state, materialColor, DRILL_COLORS, fmt } from './api.js';
 import { code128 } from './code128.js';
@@ -42,7 +43,7 @@ function getV3d() {
         if (dom) {
           v3dAssembly = m.createViewer3D(dom, {
             onPanelSelect: (panelId) => {
-              window.system2.selectPanel(panelId, 'assembly');
+              selectPanel(panelId, 'assembly');
             },
           });
         }
@@ -70,276 +71,296 @@ function getV3d() {
 }
 
 // ---------------------------------------------------------------------------
-// Global Controller: window.system2
+// Controller Functions
 // ---------------------------------------------------------------------------
-window.system2 = {
-  // Station navigation
-  switchStation(stationName) {
-    activeStation = stationName;
-    document.querySelectorAll('.station-tab').forEach((tab) => {
-      tab.classList.toggle('active', tab.dataset.station === stationName);
-    });
+function switchStation(stationName) {
+  activeStation = stationName;
+  document.querySelectorAll('.station-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.station === stationName);
+  });
 
-    const views = {
-      assembly: document.getElementById('view-assembly'),
-      cnc: document.getElementById('view-cnc'),
-      saw: document.getElementById('view-saw'),
-      cam: document.getElementById('view-cam'),
-    };
+  const views = {
+    assembly: document.getElementById('view-assembly'),
+    cnc: document.getElementById('view-cnc'),
+    saw: document.getElementById('view-saw'),
+    cam: document.getElementById('view-cam'),
+  };
 
-    for (const [key, dom] of Object.entries(views)) {
-      if (dom) {
-        dom.classList.toggle('hidden', key !== stationName);
-        dom.classList.toggle('active', key === stationName);
-      }
+  for (const [key, dom] of Object.entries(views)) {
+    if (dom) {
+      dom.classList.toggle('hidden', key !== stationName);
+      dom.classList.toggle('active', key === stationName);
     }
+  }
 
-    requestAnimationFrame(() => {
-      if (stationName === 'assembly') getV3d().then((v) => v.resize());
-      if (stationName === 'cnc' && v2dCnc) v2dCnc.resize();
-      if (stationName === 'cam' && v2dCam) v2dCam.resize();
-    });
-  },
+  requestAnimationFrame(() => {
+    if (stationName === 'assembly') getV3d().then((v) => v.resize());
+    if (stationName === 'cnc' && v2dCnc) v2dCnc.resize();
+    if (stationName === 'cam' && v2dCam) v2dCam.resize();
+  });
+}
 
-  // CAM sub tabs
-  switchCamTab(tabName) {
-    document.querySelectorAll('.cam-tab').forEach((tab) => {
-      tab.classList.toggle('active', tab.dataset.camTab === tabName);
-    });
-    const panels = {
-      import: document.getElementById('campanel-import'),
-      preflight: document.getElementById('campanel-preflight'),
-      cad2d: document.getElementById('campanel-cad2d'),
-      settings: document.getElementById('campanel-settings'),
-    };
-    for (const [key, dom] of Object.entries(panels)) {
-      if (dom) dom.classList.toggle('hidden', key !== tabName);
+function switchCamTab(tabName) {
+  document.querySelectorAll('.cam-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.camTab === tabName);
+  });
+  const panels = {
+    import: document.getElementById('campanel-import'),
+    preflight: document.getElementById('campanel-preflight'),
+    cad2d: document.getElementById('campanel-cad2d'),
+    settings: document.getElementById('campanel-settings'),
+  };
+  for (const [key, dom] of Object.entries(panels)) {
+    if (dom) dom.classList.toggle('hidden', key !== tabName);
+  }
+  if (tabName === 'cad2d' && v2dCam) {
+    requestAnimationFrame(() => v2dCam.resize());
+  }
+}
+
+function toggleAudio() {
+  soundEnabled = !soundEnabled;
+  const btn = document.getElementById('btnAudioToggle');
+  if (btn) btn.textContent = soundEnabled ? '🔊 Sound' : '🔇 Muted';
+  if (soundEnabled) playSuccessChime();
+}
+
+function openSettings() {
+  switchStation('cam');
+  switchCamTab('settings');
+}
+
+async function loadDemoKitchen() {
+  try {
+    setStatus('Loading demo Polyboard kitchen batch…');
+    const res = await api('/api/load-sample', { method: 'POST' });
+    await refreshProjects();
+    if (res && res.project) {
+      await openProject(res.project.id);
     }
-    if (tabName === 'cad2d' && v2dCam) {
-      requestAnimationFrame(() => v2dCam.resize());
-    }
-  },
-
-  // Audio Toggle
-  toggleAudio() {
-    soundEnabled = !soundEnabled;
-    const btn = document.getElementById('btnAudioToggle');
-    if (btn) btn.textContent = soundEnabled ? '🔊 Sound' : '🔇 Muted';
     if (soundEnabled) playSuccessChime();
-  },
+    showScanToast('Demo Kitchen Loaded', 'Imported BASE-01 and WALL-01 cabinets.', 'ok');
+    setStatus('✔ Kitchen Demo batch loaded successfully.', 'ok');
+  } catch (e) {
+    setStatus(`Failed to load demo: ${e.message}`, 'error');
+  }
+}
 
-  // Settings open
-  openSettings() {
-    window.system2.switchStation('cam');
-    window.system2.switchCamTab('settings');
-  },
+async function triggerManualScan() {
+  const input = document.getElementById('barcodeManualInput');
+  if (input && input.value) {
+    const code = input.value.trim();
+    input.value = '';
+    await handleBarcodeScan(code, activeStation);
+  }
+}
 
-  // Sample batch loading
-  async loadDemoKitchen() {
-    try {
-      setStatus('Loading demo Polyboard kitchen batch…');
-      const res = await api('/api/load-sample', { method: 'POST' });
-      await refreshProjects();
-      if (res && res.project) {
-        await openProject(res.project.id);
-      }
-      if (soundEnabled) playSuccessChime();
-      showScanToast('Demo Kitchen Loaded', 'Imported BASE-01 and WALL-01 cabinets.', 'ok');
-      setStatus('✔ Kitchen Demo batch loaded successfully.', 'ok');
-    } catch (e) {
-      setStatus(`Failed to load demo: ${e.message}`, 'error');
-    }
-  },
+async function quickScan(barcode) {
+  await handleBarcodeScan(barcode, activeStation);
+}
 
-  // Barcode Scanning
-  async triggerManualScan() {
-    const input = document.getElementById('barcodeManualInput');
-    if (input && input.value) {
-      const code = input.value.trim();
-      input.value = '';
-      await handleBarcodeScan(code, activeStation);
-    }
-  },
-
-  async quickScan(barcode) {
-    await handleBarcodeScan(barcode, activeStation);
-  },
-
-  // Cabinet & Panel selection
-  onCabinetChange(cabId) {
-    if (!state.project) return;
-    activeCabinet = state.project.cabinets.find((c) => c.id === cabId) || activeCabinet;
-    if (activeCabinet && activeCabinet.panels.length > 0) {
-      activePanel = activeCabinet.panels[0];
-    }
-    renderAssemblyStation();
-    getV3d().then((v3d) => {
-      v3d.setProject(state.project, { cabinetId: activeCabinet ? activeCabinet.id : undefined, panelId: activePanel ? activePanel.id : undefined });
+function onCabinetChange(cabId) {
+  if (!state.project) return;
+  activeCabinet = state.project.cabinets.find((c) => c.id === cabId) || activeCabinet;
+  if (activeCabinet && activeCabinet.panels.length > 0) {
+    activePanel = activeCabinet.panels[0];
+  }
+  renderAssemblyStation();
+  getV3d().then((v3d) => {
+    v3d.setProject(state.project, {
+      cabinetId: activeCabinet ? activeCabinet.id : undefined,
+      panelId: activePanel ? activePanel.id : undefined,
     });
-  },
+  });
+}
 
-  onProjectChange(projId) {
-    if (projId) openProject(projId);
-  },
+function onProjectChange(projId) {
+  if (projId) openProject(projId);
+}
 
-  selectPanel(panelId, sourceStation = activeStation) {
-    if (!state.project) return;
-    for (const cab of state.project.cabinets) {
-      const p = cab.panels.find((x) => x.id === panelId || x.partCode === panelId);
-      if (p) {
-        activeCabinet = cab;
-        activePanel = p;
-        break;
-      }
+function selectPanel(panelId, sourceStation = activeStation) {
+  if (!state.project) return;
+  for (const cab of state.project.cabinets) {
+    const p = cab.panels.find((x) => x.id === panelId || x.partCode === panelId);
+    if (p) {
+      activeCabinet = cab;
+      activePanel = p;
+      break;
     }
+  }
 
-    renderCabinetSelector();
+  renderCabinetSelector();
+  renderAssemblyStation();
+  renderCncStation();
+
+  getV3d().then((v3d) => {
+    v3d.highlight(activePanel ? activePanel.id : null, true);
+  });
+
+  if (v2dCnc && activePanel) {
+    v2dCnc.setPanel(activePanel);
+  }
+  if (v2dCam && activePanel) {
+    updateCad2dLayers();
+  }
+}
+
+function fit3d() {
+  getV3d().then((v3d) => v3d.resetView());
+}
+
+function fullBatch3d() {
+  getV3d().then((v3d) => v3d.setProject(state.project, {}));
+}
+
+function onExplodeChange(val) {
+  const factor = Number(val) / 100;
+  const txt = document.getElementById('explodeVal');
+  if (txt) txt.textContent = `${val}%`;
+  getV3d().then((v3d) => v3d.setExplode(factor));
+}
+
+function onGhostChange(checked) {
+  getV3d().then((v3d) => v3d.setGhostMode(checked));
+}
+
+async function stageCurrentPanel() {
+  if (activePanel) {
+    await togglePartStageStatus(activePanel);
+  }
+}
+
+async function togglePartStage(panelId) {
+  if (!state.project) return;
+  const panel = state.project.cabinets.flatMap((c) => c.panels).find((p) => p.id === panelId);
+  if (panel) {
+    await togglePartStageStatus(panel);
+  }
+}
+
+async function markCurrentCabAssembled() {
+  if (!activeCabinet || !state.project) return;
+  for (const p of activeCabinet.panels) {
+    await updatePartStatus(p.id, 'staged', 'assembly');
+  }
+  if (soundEnabled) playStageChime();
+  showScanToast(`Cabinet ${activeCabinet.name} Staged`, `All ${activeCabinet.panels.length} parts ready for assembly.`, 'ok');
+}
+
+async function resetTracking() {
+  if (!state.project) return;
+  if (confirm('Reset tracking status for all parts in this project?')) {
+    await api(`/api/projects/${encodeURIComponent(state.project.id)}/reset-status`, { method: 'POST' });
+    state.project = await api(`/api/projects/${encodeURIComponent(state.project.id)}`);
     renderAssemblyStation();
     renderCncStation();
+    renderSawStation();
+    showScanToast('Tracking Reset', 'All parts reset to pending_cut.', 'ok');
+  }
+}
 
-    getV3d().then((v3d) => {
-      v3d.highlight(activePanel ? activePanel.id : null, true);
+async function distributeLan() {
+  if (!state.project) return;
+  try {
+    setStatus('Pushing compiled CIX batch to Rover A LAN directory…');
+    const res = await api(`/api/projects/${encodeURIComponent(state.project.id)}/distribute`, {
+      method: 'POST',
+      body: JSON.stringify({ settings: state.settings }),
     });
-
-    if (v2dCnc && activePanel) {
-      v2dCnc.setPanel(activePanel);
+    if (res.ok) {
+      showScanToast('LAN Drop Successful', `Pushed ${res.files.length} .cix programs to Rover A.`, 'ok');
+      setStatus(`✔ Successfully pushed ${res.files.length} .cix files over LAN.`, 'ok');
+    } else {
+      showScanToast('LAN Drop Blocked', 'Pre-flight errors prevented distribution.', 'error');
     }
-    if (v2dCam && activePanel) {
-      updateCad2dLayers();
-    }
-  },
+  } catch (e) {
+    setStatus(`LAN drop error: ${e.message}`, 'error');
+  }
+}
 
-  // 3D Controls
-  fit3d() {
-    getV3d().then((v3d) => v3d.resetView());
-  },
+async function markCncComplete() {
+  if (activePanel) {
+    await updatePartStatus(activePanel.id, 'machined', 'cnc');
+  }
+}
 
-  fullBatch3d() {
-    getV3d().then((v3d) => v3d.setProject(state.project, {}));
-  },
+function downloadActiveCix() {
+  if (activePanel && state.project) {
+    window.location.href = `/api/projects/${encodeURIComponent(state.project.id)}/cix/${encodeURIComponent(activePanel.id)}`;
+  }
+}
 
-  onExplodeChange(val) {
-    const factor = Number(val) / 100;
-    const txt = document.getElementById('explodeVal');
-    if (txt) txt.textContent = `${val}%`;
-    getV3d().then((v3d) => v3d.setExplode(factor));
-  },
+function updateCad2dLayers() {
+  if (v2dCam && activePanel) {
+    const chkDrills = document.getElementById('chkCadDrills');
+    const chkGrooves = document.getElementById('chkCadGrooves');
+    const chkBand = document.getElementById('chkCadBand');
+    const chkOrigins = document.getElementById('chkCadOrigins');
+    v2dCam.setPanel(activePanel, {
+      showDrills: chkDrills ? chkDrills.checked : true,
+      showGrooves: chkGrooves ? chkGrooves.checked : true,
+      showBand: chkBand ? chkBand.checked : true,
+      showOrigins: chkOrigins ? chkOrigins.checked : true,
+    });
+  }
+}
 
-  onGhostChange(checked) {
-    getV3d().then((v3d) => v3d.setGhostMode(checked));
-  },
+function revalidate() {
+  renderCamStation();
+}
 
-  // Assembly Tracking
-  async stageCurrentPanel() {
-    if (activePanel) {
-      await togglePartStageStatus(activePanel);
-    }
-  },
+async function saveSettings() {
+  await saveWorkshopSettings();
+}
 
-  async togglePartStage(panelId) {
-    if (!state.project) return;
-    const panel = state.project.cabinets.flatMap((c) => c.panels).find((p) => p.id === panelId);
-    if (panel) {
-      await togglePartStageStatus(panel);
-    }
-  },
+function addMachineFolder() {
+  if (state.settings && state.settings.network) {
+    state.settings.network.machineFolders.push({ name: 'New Station', folder: 'station-folder' });
+    renderWorkshopSettings();
+  }
+}
 
-  async markCurrentCabAssembled() {
-    if (!activeCabinet || !state.project) return;
-    for (const p of activeCabinet.panels) {
-      await updatePartStatus(p.id, 'staged', 'assembly');
-    }
-    if (soundEnabled) playStageChime();
-    showScanToast(`Cabinet ${activeCabinet.name} Staged`, `All ${activeCabinet.panels.length} parts ready for assembly.`, 'ok');
-  },
+function removeMachineFolder(idx) {
+  if (state.settings && state.settings.network && state.settings.network.machineFolders) {
+    state.settings.network.machineFolders.splice(idx, 1);
+    renderWorkshopSettings();
+  }
+}
 
-  async resetTracking() {
-    if (!state.project) return;
-    if (confirm('Reset tracking status for all parts in this project?')) {
-      await api(`/api/projects/${encodeURIComponent(state.project.id)}/reset-status`, { method: 'POST' });
-      state.project = await api(`/api/projects/${encodeURIComponent(state.project.id)}`);
-      renderAssemblyStation();
-      renderCncStation();
-      renderSawStation();
-      showScanToast('Tracking Reset', 'All parts reset to pending_cut.', 'ok');
-    }
-  },
-
-  // CNC Station
-  async distributeLan() {
-    if (!state.project) return;
-    try {
-      setStatus('Pushing compiled CIX batch to Rover A LAN directory…');
-      const res = await api(`/api/projects/${encodeURIComponent(state.project.id)}/distribute`, {
-        method: 'POST',
-        body: JSON.stringify({ settings: state.settings }),
-      });
-      if (res.ok) {
-        showScanToast('LAN Drop Successful', `Pushed ${res.files.length} .cix programs to Rover A.`, 'ok');
-        setStatus(`✔ Successfully pushed ${res.files.length} .cix files over LAN.`, 'ok');
-      } else {
-        showScanToast('LAN Drop Blocked', 'Pre-flight errors prevented distribution.', 'error');
-      }
-    } catch (e) {
-      setStatus(`LAN drop error: ${e.message}`, 'error');
-    }
-  },
-
-  async markCncComplete() {
-    if (activePanel) {
-      await updatePartStatus(activePanel.id, 'machined', 'cnc');
-    }
-  },
-
-  downloadActiveCix() {
-    if (activePanel && state.project) {
-      window.location.href = `/api/projects/${encodeURIComponent(state.project.id)}/cix/${encodeURIComponent(activePanel.id)}`;
-    }
-  },
-
-  // CAD 2D Layer updates
-  updateCad2dLayers() {
-    if (v2dCam && activePanel) {
-      const chkDrills = document.getElementById('chkCadDrills');
-      const chkGrooves = document.getElementById('chkCadGrooves');
-      const chkBand = document.getElementById('chkCadBand');
-      const chkOrigins = document.getElementById('chkCadOrigins');
-      v2dCam.setPanel(activePanel, {
-        showDrills: chkDrills ? chkDrills.checked : true,
-        showGrooves: chkGrooves ? chkGrooves.checked : true,
-        showBand: chkBand ? chkBand.checked : true,
-        showOrigins: chkOrigins ? chkOrigins.checked : true,
-      });
-    }
-  },
-
-  // CAM & Pre-flight
-  revalidate() {
-    renderCamStation();
-  },
-
-  async saveSettings() {
-    await saveWorkshopSettings();
-  },
-
-  addMachineFolder() {
-    if (state.settings && state.settings.network) {
-      state.settings.network.machineFolders.push({ name: 'New Station', folder: 'station-folder' });
-      renderWorkshopSettings();
-    }
-  },
-
-  removeMachineFolder(idx) {
-    if (state.settings && state.settings.network && state.settings.network.machineFolders) {
-      state.settings.network.machineFolders.splice(idx, 1);
-      renderWorkshopSettings();
-    }
-  },
+// ---------------------------------------------------------------------------
+// Export on window.system2
+// ---------------------------------------------------------------------------
+window.system2 = {
+  switchStation,
+  switchCamTab,
+  toggleAudio,
+  openSettings,
+  loadDemoKitchen,
+  triggerManualScan,
+  quickScan,
+  onCabinetChange,
+  onProjectChange,
+  selectPanel,
+  fit3d,
+  fullBatch3d,
+  onExplodeChange,
+  onGhostChange,
+  stageCurrentPanel,
+  togglePartStage,
+  markCurrentCabAssembled,
+  resetTracking,
+  distributeLan,
+  markCncComplete,
+  downloadActiveCix,
+  updateCad2dLayers,
+  revalidate,
+  saveSettings,
+  addMachineFolder,
+  removeMachineFolder,
 };
 
-// Aliases for quick convenience
-window.switchStation = window.system2.switchStation;
-window.loadDemoKitchen = window.system2.loadDemoKitchen;
+window.switchStation = switchStation;
+window.loadDemoKitchen = loadDemoKitchen;
 
 // ---------------------------------------------------------------------------
 // Bootstrap & Initialization
@@ -376,7 +397,7 @@ async function init() {
     await refreshProjects();
 
     if (!state.projects.length) {
-      await window.system2.loadDemoKitchen();
+      await loadDemoKitchen();
     }
   } catch (e) {
     setStatus(`Startup note: ${e.message}`, 'error');
@@ -401,7 +422,7 @@ function bindGlobalDelegation() {
     const stationTab = e.target.closest('[data-station]');
     if (stationTab) {
       e.preventDefault();
-      window.system2.switchStation(stationTab.dataset.station);
+      switchStation(stationTab.dataset.station);
       return;
     }
 
@@ -409,7 +430,7 @@ function bindGlobalDelegation() {
     const camTab = e.target.closest('[data-cam-tab]');
     if (camTab) {
       e.preventDefault();
-      window.system2.switchCamTab(camTab.dataset.camTab);
+      switchCamTab(camTab.dataset.camTab);
       return;
     }
 
@@ -417,7 +438,7 @@ function bindGlobalDelegation() {
     const pill = e.target.closest('[data-quick-scan]');
     if (pill) {
       e.preventDefault();
-      window.system2.quickScan(pill.dataset.quickScan);
+      quickScan(pill.dataset.quickScan);
       return;
     }
 
@@ -428,9 +449,9 @@ function bindGlobalDelegation() {
       if (stageBtn) {
         e.preventDefault();
         e.stopPropagation();
-        window.system2.togglePartStage(partCard.dataset.panelId);
+        togglePartStage(partCard.dataset.panelId);
       } else {
-        window.system2.selectPanel(partCard.dataset.panelId);
+        selectPanel(partCard.dataset.panelId);
       }
       return;
     }
@@ -442,7 +463,7 @@ function bindGlobalDelegation() {
     barcodeInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        window.system2.triggerManualScan();
+        triggerManualScan();
       }
     });
   }
