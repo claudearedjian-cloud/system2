@@ -4,8 +4,34 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>system2 · Woodworking Operations Engine (Polyboard → Cut Rite / bSolid)</title>
-  <link rel="stylesheet" href="/css/app.css?v=7" />
+  <link rel="stylesheet" href="/css/app.css?v=8" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f766e'/%3E%3Cpath d='M8 9h16v14H8z' fill='none' stroke='%232dd4bf' stroke-width='2'/%3E%3Ccircle cx='13' cy='14' r='2' fill='%23f5a623'/%3E%3Ccircle cx='19' cy='14' r='2' fill='%23f5a623'/%3E%3C/svg%3E" />
+  <script>
+    // Synchronous fail-safe bootstrap stub
+    window.system2 = window.system2 || {
+      switchStation: function(name) {
+        document.querySelectorAll('.station-tab').forEach(function(t) {
+          t.classList.toggle('active', t.getAttribute('data-station') === name);
+        });
+        ['assembly', 'cnc', 'saw', 'cam'].forEach(function(k) {
+          var el = document.getElementById('view-' + k);
+          if (el) {
+            el.classList.toggle('hidden', k !== name);
+            el.classList.toggle('active', k === name);
+          }
+        });
+      },
+      switchCamTab: function(tabName) {
+        document.querySelectorAll('.cam-tab').forEach(function(t) {
+          t.classList.toggle('active', t.getAttribute('data-cam-tab') === tabName);
+        });
+        ['import', 'preflight', 'cad2d', 'settings'].forEach(function(k) {
+          var el = document.getElementById('campanel-' + k);
+          if (el) el.classList.toggle('hidden', k !== tabName);
+        });
+      }
+    };
+  </script>
 </head>
 <body>
   <!-- On-Screen Diagnostics Banner (surfaces any browser-level error immediately) -->
@@ -18,7 +44,7 @@
       <div id="toastTitle" class="toast-title">Scanned Part</div>
       <div id="toastMessage" class="toast-msg">Staged for assembly</div>
     </div>
-    <button id="toastClose" class="toast-close">✕</button>
+    <button type="button" id="toastClose" class="toast-close" onclick="document.getElementById('scanToast').classList.add('hidden')">✕</button>
   </div>
 
   <!-- Header & Station Selector -->
@@ -33,19 +59,19 @@
 
     <!-- Station Navigation Tabs (Module C & D) -->
     <nav class="station-nav" id="stationNav">
-      <button data-station="assembly" class="station-tab active">
+      <button type="button" data-station="assembly" onclick="system2.switchStation('assembly')" class="station-tab active">
         <span class="st-icon">📱</span>
         <span class="st-label">Assembly Zone</span>
       </button>
-      <button data-station="cnc" class="station-tab">
+      <button type="button" data-station="cnc" onclick="system2.switchStation('cnc')" class="station-tab">
         <span class="st-icon">⚙️</span>
         <span class="st-label">CNC Rover A</span>
       </button>
-      <button data-station="saw" class="station-tab">
+      <button type="button" data-station="saw" onclick="system2.switchStation('saw')" class="station-tab">
         <span class="st-icon">🪚</span>
         <span class="st-label">Cut Rite Saw</span>
       </button>
-      <button data-station="cam" class="station-tab">
+      <button type="button" data-station="cam" onclick="system2.switchStation('cam')" class="station-tab">
         <span class="st-icon">📐</span>
         <span class="st-label">CAM &amp; Pre-Flight</span>
       </button>
@@ -59,7 +85,7 @@
       </div>
       <div class="scan-input-group">
         <input type="text" id="barcodeManualInput" class="barcode-input" placeholder="Scan or enter barcode..." />
-        <button id="btnManualScan" class="btn small" title="Simulate Barcode Scan">Scan</button>
+        <button type="button" id="btnManualScan" onclick="system2.triggerManualScan()" class="btn small" title="Simulate Barcode Scan">Scan</button>
       </div>
       <div class="quick-scan-pills" id="quickScanPills" title="Quick Barcode Simulators">
         <!-- populated dynamically -->
@@ -69,11 +95,11 @@
     <!-- Right Actions -->
     <div class="topbar-actions">
       <div class="project-picker">
-        <select id="projectSelect" title="Select active manufacturing batch"></select>
+        <select id="projectSelect" onchange="system2.onProjectChange(this.value)" title="Select active manufacturing batch"></select>
       </div>
-      <button class="btn ghost small" id="btnLoadSample" title="Load the bundled demo kitchen project">▶ Sample</button>
-      <button class="btn ghost small" id="btnAudioToggle" title="Toggle audio feedback">🔊 Sound</button>
-      <button class="btn ghost small" id="btnSettings" title="Workshop Settings">⚙</button>
+      <button type="button" class="btn ghost small" id="btnLoadSample" onclick="system2.loadDemoKitchen()" title="Load the bundled demo kitchen project">▶ Sample</button>
+      <button type="button" class="btn ghost small" id="btnAudioToggle" onclick="system2.toggleAudio()" title="Toggle audio feedback">🔊 Sound</button>
+      <button type="button" class="btn ghost small" id="btnSettings" onclick="system2.openSettings()" title="Workshop Settings">⚙</button>
     </div>
   </header>
 
@@ -95,7 +121,7 @@
             </div>
             <div class="cabinet-selector-row">
               <label for="assemblyCabinetSelect">Active Cabinet:</label>
-              <select id="assemblyCabinetSelect"></select>
+              <select id="assemblyCabinetSelect" onchange="system2.onCabinetChange(this.value)"></select>
             </div>
             <!-- Cabinet Assembly Progress Bar -->
             <div class="progress-container">
@@ -117,8 +143,8 @@
           </div>
 
           <div class="panel-footer">
-            <button id="btnResetBatchStatus" class="btn small ghost danger" title="Reset all parts in batch to pending_cut">↺ Reset Tracking</button>
-            <button id="btnMarkCabAssembled" class="btn small ok" title="Mark entire cabinet as assembled">✔ All Staged</button>
+            <button type="button" id="btnResetBatchStatus" onclick="system2.resetTracking()" class="btn small ghost danger" title="Reset all parts in batch to pending_cut">↺ Reset Tracking</button>
+            <button type="button" id="btnMarkCabAssembled" onclick="system2.markCurrentCabAssembled()" class="btn small ok" title="Mark entire cabinet as assembled">✔ All Staged</button>
           </div>
         </aside>
 
@@ -126,21 +152,21 @@
         <main class="assembly-center-panel">
           <div class="assembly-3d-toolbar">
             <div class="view-controls">
-              <button id="btn3dReset" class="btn small ghost" title="Reset 3D camera to fit assembly">⌖ Fit Cabinet</button>
-              <button id="btn3dFullBatch" class="btn small ghost" title="Show all cabinets in project">Full Batch</button>
+              <button type="button" id="btn3dReset" onclick="system2.fit3d()" class="btn small ghost" title="Reset 3D camera to fit assembly">⌖ Fit Cabinet</button>
+              <button type="button" id="btn3dFullBatch" onclick="system2.fullBatch3d()" class="btn small ghost" title="Show all cabinets in project">Full Batch</button>
             </div>
 
             <!-- Exploded View Slider (Module D Interactive Feature) -->
             <div class="explode-control">
               <label for="sliderExplode">Exploded View:</label>
-              <input type="range" id="sliderExplode" min="0" max="100" value="0" />
+              <input type="range" id="sliderExplode" min="0" max="100" value="0" oninput="system2.onExplodeChange(this.value)" />
               <span id="explodeVal" class="mono">0%</span>
             </div>
 
             <!-- Ghost Mode Toggle -->
             <div class="view-options">
               <label class="check-box" title="Make non-highlighted panels translucent so active piece stands out">
-                <input type="checkbox" id="chkGhostMode" /> Ghost Background
+                <input type="checkbox" id="chkGhostMode" onchange="system2.onGhostChange(this.checked)" /> Ghost Background
               </label>
             </div>
           </div>
@@ -196,7 +222,7 @@
 
           <!-- Bottom Action Buttons -->
           <div class="panel-footer">
-            <button id="btnToggleStageCurrent" class="btn ok full-width">Mark as Staged for Assembly</button>
+            <button type="button" id="btnToggleStageCurrent" onclick="system2.stageCurrentPanel()" class="btn ok full-width">Mark as Staged for Assembly</button>
           </div>
         </aside>
 
@@ -240,8 +266,8 @@
               <strong id="cncActivePartTitle">Select a part to preview machining</strong>
             </div>
             <div class="cnc-actions">
-              <button id="btnDistributeLan" class="btn ok small">🚀 Push Batch to Rover A (LAN Drop)</button>
-              <button id="btnMarkCncComplete" class="btn small">✔ Mark Machining Done</button>
+              <button type="button" id="btnDistributeLan" onclick="system2.distributeLan()" class="btn ok small">🚀 Push Batch to Rover A (LAN Drop)</button>
+              <button type="button" id="btnMarkCncComplete" onclick="system2.markCncComplete()" class="btn small">✔ Mark Machining Done</button>
             </div>
           </div>
 
@@ -259,7 +285,7 @@
         <aside class="cnc-right-panel">
           <div class="panel-header">
             <h2>bSolid .cix Program</h2>
-            <button id="btnDownloadCix" class="btn small ghost">⬇ Download .cix</button>
+            <button type="button" id="btnDownloadCix" onclick="system2.downloadActiveCix()" class="btn small ghost">⬇ Download .cix</button>
           </div>
           <div class="cix-code-container">
             <pre class="cix-code-block" id="cixCodePreview">; Select a part or scan barcode to view .cix code</pre>
@@ -283,7 +309,7 @@
               </div>
               <div class="saw-actions">
                 <a id="btnDownloadCutRiteCsv" class="btn ok" href="#" download>⬇ Download Cut Rite CSV</a>
-                <button id="btnPrintLabelsFromSaw" class="btn">🖨 Print Barcode Labels</button>
+                <button type="button" id="btnPrintLabelsFromSaw" onclick="window.print()" class="btn">🖨 Print Barcode Labels</button>
               </div>
             </div>
 
@@ -334,7 +360,7 @@
           <div class="card">
             <div class="section-head">
               <h2>Part Labels (Thermal Barcode Ready)</h2>
-              <button id="btnPrintAllLabels" class="btn small">🖨 Print All Labels</button>
+              <button type="button" id="btnPrintAllLabels" onclick="window.print()" class="btn small">🖨 Print All Labels</button>
             </div>
             <div class="labels-grid" id="sawLabelsGrid">
               <!-- Barcode label cards -->
@@ -351,10 +377,10 @@
       <div class="cam-layout">
         <!-- Sub Navigation -->
         <div class="cam-subnav">
-          <button data-cam-tab="import" class="cam-tab active">📁 Import Batch</button>
-          <button data-cam-tab="preflight" class="cam-tab">🛡️ Pre-Flight Safety</button>
-          <button data-cam-tab="cad2d" class="cam-tab">📐 2D CAD Panel Viewer</button>
-          <button data-cam-tab="settings" class="cam-tab">⚙ Workshop Settings</button>
+          <button type="button" data-cam-tab="import" onclick="system2.switchCamTab('import')" class="cam-tab active">📁 Import Batch</button>
+          <button type="button" data-cam-tab="preflight" onclick="system2.switchCamTab('preflight')" class="cam-tab">🛡️ Pre-Flight Safety</button>
+          <button type="button" data-cam-tab="cad2d" onclick="system2.switchCamTab('cad2d')" class="cam-tab">📐 2D CAD Panel Viewer</button>
+          <button type="button" data-cam-tab="settings" onclick="system2.switchCamTab('settings')" class="cam-tab">⚙ Workshop Settings</button>
         </div>
 
         <!-- CAM Tab 1: Import Batch -->
@@ -371,7 +397,7 @@
               <div class="row" style="margin-top: 10px; gap: 10px;">
                 <label class="btn" for="folderInputMain">Choose Folder</label>
                 <label class="btn ghost" for="fileInputMain">Choose Files</label>
-                <button class="btn ok" id="btnLoadSampleCam">▶ Load Demo Kitchen</button>
+                <button type="button" class="btn ok" id="btnLoadSampleCam" onclick="system2.loadDemoKitchen()">▶ Load Demo Kitchen</button>
               </div>
             </div>
             <div class="import-status" id="camImportStatus"></div>
@@ -383,7 +409,7 @@
           <div class="card">
             <div class="section-head">
               <h2>Pre-Flight Validation Engine</h2>
-              <button id="btnRevalidate" class="btn small ghost">↻ Re-check Batch</button>
+              <button type="button" id="btnRevalidate" onclick="system2.revalidate()" class="btn small ghost">↻ Re-check Batch</button>
             </div>
             <div id="preflightSummary" class="summary-row"></div>
             <div id="preflightIssues" class="issues-list" style="margin-top: 14px;"></div>
@@ -394,10 +420,10 @@
         <div class="cam-panel hidden" id="campanel-cad2d">
           <div class="cad2d-container">
             <div class="cad2d-toolbar">
-              <label class="check-box"><input type="checkbox" id="chkCadDrills" checked /> Drillings</label>
-              <label class="check-box"><input type="checkbox" id="chkCadGrooves" checked /> Router Paths</label>
-              <label class="check-box"><input type="checkbox" id="chkCadBand" checked /> Edge Banding</label>
-              <label class="check-box"><input type="checkbox" id="chkCadOrigins" checked /> Reference Stops</label>
+              <label class="check-box"><input type="checkbox" id="chkCadDrills" onchange="system2.updateCad2dLayers()" checked /> Drillings</label>
+              <label class="check-box"><input type="checkbox" id="chkCadGrooves" onchange="system2.updateCad2dLayers()" checked /> Router Paths</label>
+              <label class="check-box"><input type="checkbox" id="chkCadBand" onchange="system2.updateCad2dLayers()" checked /> Edge Banding</label>
+              <label class="check-box"><input type="checkbox" id="chkCadOrigins" onchange="system2.updateCad2dLayers()" checked /> Reference Stops</label>
             </div>
             <div class="cad2d-host" id="cad2dHost">
               <div id="viewer2dCam" class="viewer"></div>
@@ -424,7 +450,7 @@
             </div>
             <h3 style="margin: 14px 0 6px">Machine Folders</h3>
             <div id="cfgMachineFoldersList"></div>
-            <button class="btn small ghost" id="btnAddMachineFolder" style="margin-top: 8px">+ Add Machine Subfolder</button>
+            <button type="button" class="btn small ghost" id="btnAddMachineFolder" onclick="system2.addMachineFolder()" style="margin-top: 8px">+ Add Machine Subfolder</button>
           </div>
 
           <div class="card" style="margin-top: 14px;">
@@ -436,7 +462,7 @@
           </div>
 
           <div class="row" style="margin-top: 16px;">
-            <button class="btn ok" id="btnSaveWorkshopSettings">Save Settings</button>
+            <button type="button" class="btn ok" id="btnSaveWorkshopSettings" onclick="system2.saveSettings()">Save Settings</button>
             <span id="settingsSaveMsg" class="muted"></span>
           </div>
         </div>
@@ -458,7 +484,7 @@
       function report(msg) {
         if (banner) {
           banner.hidden = false;
-          banner.innerHTML = '<strong>⚠ Application Alert:</strong> ' + msg + '<br><small>Try pressing <b>Ctrl+Shift+R</b> to force-refresh, or open <a href="/diag.html" style="color:#fff;text-decoration:underline">Diagnostics</a> or <a href="/lite.html" style="color:#fff;text-decoration:underline">Lite Mode</a>.</small>';
+          banner.innerHTML = '<strong>⚠ Application Alert:</strong> ' + msg + '<br><small>Try pressing <b>Ctrl+Shift+R</b> to force-refresh, or open <a href="/lite.html" style="color:#fff;text-decoration:underline">Lite Mode</a>.</small>';
         }
       }
       window.addEventListener('error', function (e) {
@@ -470,6 +496,6 @@
       });
     })();
   </script>
-  <script type="module" src="/js/app.js?v=7"></script>
+  <script type="module" src="/js/app.js?v=8"></script>
 </body>
 </html>
