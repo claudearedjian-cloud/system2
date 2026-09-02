@@ -2,159 +2,474 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>system2 · Cabinet Manufacturing OPS</title>
-  <link rel="stylesheet" href="/css/app.css?v=5" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f766e'/%3E%3Cpath d='M9 8h14v16H9z' fill='none' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>system2 · Woodworking Operations Engine (Polyboard → Cut Rite / bSolid)</title>
+  <link rel="stylesheet" href="/css/app.css?v=7" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230f766e'/%3E%3Cpath d='M8 9h16v14H8z' fill='none' stroke='%232dd4bf' stroke-width='2'/%3E%3Ccircle cx='13' cy='14' r='2' fill='%23f5a623'/%3E%3Ccircle cx='19' cy='14' r='2' fill='%23f5a623'/%3E%3C/svg%3E" />
 </head>
 <body>
-  <div id="fatalBanner" hidden></div>
+  <!-- On-Screen Diagnostics Banner (surfaces any browser-level error immediately) -->
+  <div id="fatalBanner" hidden style="position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fecaca;padding:12px 16px;font-size:13px;border-bottom:2px solid #ef4444;box-shadow:0 4px 12px rgba(0,0,0,0.5);"></div>
+
+  <!-- Top Global Barcode & Scan Notification Banner -->
+  <div id="scanToast" class="scan-toast hidden">
+    <div class="toast-icon">⚡</div>
+    <div class="toast-content">
+      <div id="toastTitle" class="toast-title">Scanned Part</div>
+      <div id="toastMessage" class="toast-msg">Staged for assembly</div>
+    </div>
+    <button id="toastClose" class="toast-close">✕</button>
+  </div>
+
+  <!-- Header & Station Selector -->
   <header class="topbar">
     <div class="brand">
       <span class="logo">◧</span>
       <div class="brand-text">
-        <h1>system<span>2</span></h1>
-        <p>Polyboard → bSolid · Biesse Rover A</p>
+        <h1>system<span>2</span> OPS</h1>
+        <p>Polyboard ➔ Cut Rite ➔ Biesse Rover A</p>
       </div>
     </div>
 
-    <div class="project-picker">
-      <label for="projectSelect">Project</label>
-      <select id="projectSelect"></select>
+    <!-- Station Navigation Tabs (Module C & D) -->
+    <nav class="station-nav" id="stationNav">
+      <button data-station="assembly" class="station-tab active">
+        <span class="st-icon">📱</span>
+        <span class="st-label">Assembly Zone</span>
+      </button>
+      <button data-station="cnc" class="station-tab">
+        <span class="st-icon">⚙️</span>
+        <span class="st-label">CNC Rover A</span>
+      </button>
+      <button data-station="saw" class="station-tab">
+        <span class="st-icon">🪚</span>
+        <span class="st-label">Cut Rite Saw</span>
+      </button>
+      <button data-station="cam" class="station-tab">
+        <span class="st-icon">📐</span>
+        <span class="st-label">CAM &amp; Pre-Flight</span>
+      </button>
+    </nav>
+
+    <!-- Global Barcode Hardware Scanner Input & Simulator -->
+    <div class="barcode-scanner-box">
+      <div class="scanner-indicator" title="Hardware USB/Bluetooth Barcode Scanner Active (Keyboard Emulation)">
+        <span class="pulse-dot"></span>
+        <span class="scan-label">SCANNER READY</span>
+      </div>
+      <div class="scan-input-group">
+        <input type="text" id="barcodeManualInput" class="barcode-input" placeholder="Scan or enter barcode..." />
+        <button id="btnManualScan" class="btn small" title="Simulate Barcode Scan">Scan</button>
+      </div>
+      <div class="quick-scan-pills" id="quickScanPills" title="Quick Barcode Simulators">
+        <!-- populated dynamically -->
+      </div>
     </div>
 
-    <div class="stats" id="statsBar"></div>
-
+    <!-- Right Actions -->
     <div class="topbar-actions">
-      <button class="btn" id="btnImportFolder" title="Import a Polyboard export folder">📁 Import folder</button>
-      <button class="btn ghost" id="btnLoadSample" title="Load the bundled demo kitchen">▶ Load sample</button>
-      <button class="btn ghost" id="btnSettings" title="Workshop configuration">⚙ Settings</button>
+      <div class="project-picker">
+        <select id="projectSelect" title="Select active manufacturing batch"></select>
+      </div>
+      <button class="btn ghost small" id="btnLoadSample" title="Load the bundled demo kitchen project">▶ Sample</button>
+      <button class="btn ghost small" id="btnAudioToggle" title="Toggle audio feedback">🔊 Sound</button>
+      <button class="btn ghost small" id="btnSettings" title="Workshop Settings">⚙</button>
     </div>
   </header>
 
-  <div class="layout">
-    <!-- Left: import + project tree -->
-    <aside class="sidebar">
-      <section class="import-zone">
-        <div class="dropzone" id="dropzone">
-          <div class="dz-icon">⇩</div>
-          <p><strong>Drop a Polyboard export</strong></p>
-          <p class="muted">cutting-list .txt · assembly .csv · part .dxf</p>
-          <input type="file" id="fileInput" multiple accept=".txt,.csv,.dxf" />
-          <input type="file" id="folderInput" webkitdirectory multiple />
-          <label class="btn small" for="folderInput">Choose folder</label>
-        </div>
-        <div class="import-status" id="importStatus"></div>
-      </section>
+  <!-- Main View Container -->
+  <div class="app-container">
 
-      <section class="tree-section">
-        <div class="section-head">
-          <h2>Project tree</h2>
-          <span id="treeCount" class="chip"></span>
-        </div>
-        <div class="tree" id="tree"></div>
-      </section>
-    </aside>
+    <!-- ================================================================= -->
+    <!-- STATION 1: ASSEMBLY ZONE UI (Module D) -->
+    <!-- ================================================================= -->
+    <section class="station-view active" id="view-assembly">
+      <div class="assembly-layout">
 
-    <!-- Main -->
-    <main class="main">
-      <nav class="tabs" id="tabs">
-        <button data-tab="viewer" class="active">2D / 3D Viewer</button>
-        <button data-tab="validation">Pre-flight</button>
-        <button data-tab="cix">CIX · Compile</button>
-        <button data-tab="bom">BOM &amp; Labels</button>
-        <button data-tab="settings">Settings</button>
-      </nav>
-
-      <section class="tab-panel" id="panel-viewer">
-        <div class="viewer-toolbar">
-          <div class="seg" id="viewModeSeg">
-            <button data-mode="2d" class="active">2D panel</button>
-            <button data-mode="3d">3D assembly</button>
+        <!-- Left Panel: Cabinet Tree & Part Checklist -->
+        <aside class="assembly-left-panel">
+          <div class="panel-header">
+            <div class="header-title">
+              <h2>Cabinet Parts Checklist</h2>
+              <span id="assemblyCabBadge" class="badge ok">BASE-01</span>
+            </div>
+            <div class="cabinet-selector-row">
+              <label for="assemblyCabinetSelect">Active Cabinet:</label>
+              <select id="assemblyCabinetSelect"></select>
+            </div>
+            <!-- Cabinet Assembly Progress Bar -->
+            <div class="progress-container">
+              <div class="progress-info">
+                <span id="assemblyProgressLabel">Assembly Progress: 0 / 0 Parts (0%)</span>
+                <span id="assemblyStatusTag" class="chip">In Progress</span>
+              </div>
+              <div class="progress-bar-track">
+                <div id="assemblyProgressBar" class="progress-bar-fill" style="width: 0%"></div>
+              </div>
+            </div>
           </div>
-          <div class="viewer-actions">
-            <label class="check"><input type="checkbox" id="chkShowDrills" checked /> drillings</label>
-            <label class="check"><input type="checkbox" id="chkShowGrooves" checked /> toolpaths</label>
-            <label class="check"><input type="checkbox" id="chkShowBand" checked /> edge banding</label>
-            <button class="btn small ghost" id="btnFit">⌖ fit</button>
+
+          <!-- Interactive Parts Checklist -->
+          <div class="parts-checklist-container">
+            <div id="assemblyPartsList" class="parts-checklist">
+              <!-- Dynamically populated with parts, badges, checkboxes -->
+            </div>
+          </div>
+
+          <div class="panel-footer">
+            <button id="btnResetBatchStatus" class="btn small ghost danger" title="Reset all parts in batch to pending_cut">↺ Reset Tracking</button>
+            <button id="btnMarkCabAssembled" class="btn small ok" title="Mark entire cabinet as assembled">✔ All Staged</button>
+          </div>
+        </aside>
+
+        <!-- Center Panel: Three.js WebGL Interactive 3D Renderer & Active Part Highlighter -->
+        <main class="assembly-center-panel">
+          <div class="assembly-3d-toolbar">
+            <div class="view-controls">
+              <button id="btn3dReset" class="btn small ghost" title="Reset 3D camera to fit assembly">⌖ Fit Cabinet</button>
+              <button id="btn3dFullBatch" class="btn small ghost" title="Show all cabinets in project">Full Batch</button>
+            </div>
+
+            <!-- Exploded View Slider (Module D Interactive Feature) -->
+            <div class="explode-control">
+              <label for="sliderExplode">Exploded View:</label>
+              <input type="range" id="sliderExplode" min="0" max="100" value="0" />
+              <span id="explodeVal" class="mono">0%</span>
+            </div>
+
+            <!-- Ghost Mode Toggle -->
+            <div class="view-options">
+              <label class="check-box" title="Make non-highlighted panels translucent so active piece stands out">
+                <input type="checkbox" id="chkGhostMode" /> Ghost Background
+              </label>
+            </div>
+          </div>
+
+          <!-- 3D WebGL Host -->
+          <div class="assembly-3d-host" id="assembly3dHost">
+            <div id="viewer3dAssembly" class="viewer"></div>
+            <div id="assemblyActiveBanner" class="active-part-banner hidden">
+              <span class="active-icon">★</span>
+              <span id="activePartName">Left Side (BASE-01-001)</span>
+              <span class="active-highlight-tag">PULSING IN 3D</span>
+            </div>
+            <div id="assemblyEmptyHint" class="empty-hint hidden">Load a project or scan a part barcode to begin.</div>
+          </div>
+        </main>
+
+        <!-- Right Panel: Hardware Detail Panel & Graphics (Module D) -->
+        <aside class="assembly-right-panel">
+          <div class="panel-header">
+            <div class="header-title">
+              <h2>Hardware &amp; Fittings</h2>
+              <span id="hwPartCodeBadge" class="badge ok mono">—</span>
+            </div>
+            <p class="panel-subtitle" id="hwPanelSubtitle">Required fittings for scanned component</p>
+          </div>
+
+          <div class="hw-scroll-content">
+            <!-- Active Panel Specifications Card -->
+            <div class="panel-spec-card" id="activePanelSpecCard">
+              <div class="spec-head" id="specPartTitle">No Part Selected</div>
+              <div class="spec-grid" id="specGrid">
+                <div class="spec-item"><span class="k">Size</span><span class="v" id="specDim">—</span></div>
+                <div class="spec-item"><span class="k">Material</span><span class="v" id="specMat">—</span></div>
+                <div class="spec-item"><span class="k">Grain</span><span class="v" id="specGrain">—</span></div>
+                <div class="spec-item"><span class="k">Status</span><span class="v" id="specStatus">—</span></div>
+              </div>
+              <div class="edgeband-row" id="specEdgeband">
+                <!-- Edge banding pills -->
+              </div>
+            </div>
+
+            <!-- Hardware Cards Container -->
+            <div class="hardware-cards-section">
+              <div class="section-label">
+                <span>Pre-Assembly Fittings Checklist</span>
+                <span id="hwCountBadge" class="chip">0 items</span>
+              </div>
+              <div id="hardwareCardsList" class="hardware-cards-list">
+                <!-- Dynamically populated with graphical hardware cards -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Action Buttons -->
+          <div class="panel-footer">
+            <button id="btnToggleStageCurrent" class="btn ok full-width">Mark as Staged for Assembly</button>
+          </div>
+        </aside>
+
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- STATION 2: CNC OPERATOR STATION (Biesse Rover A - Module B) -->
+    <!-- ================================================================= -->
+    <section class="station-view hidden" id="view-cnc">
+      <div class="cnc-layout">
+        <!-- CNC Left Sidebar: Rover A Queue & Spindle Array -->
+        <aside class="cnc-left-panel">
+          <div class="panel-header">
+            <h2>Rover A Machine Queue</h2>
+            <span class="badge info">Pod-and-Rail CNC</span>
+          </div>
+
+          <div class="cnc-part-queue" id="cncPartQueue">
+            <!-- Part queue items with machining status -->
+          </div>
+
+          <!-- Biesse Spindle Array Status -->
+          <div class="cnc-tooling-box">
+            <h3>Active Tooling Array</h3>
+            <div class="spindle-grid" id="cncSpindleGrid">
+              <div class="spindle-card"><span class="sp-num">SP 1</span><span class="sp-tool">Ø5mm System Drill</span></div>
+              <div class="spindle-card"><span class="sp-num">SP 2</span><span class="sp-tool">Ø8mm Dowel Drill</span></div>
+              <div class="spindle-card"><span class="sp-num">SP 3</span><span class="sp-tool">Ø35mm Hinge Boring</span></div>
+              <div class="spindle-card"><span class="sp-num">AGG</span><span class="sp-tool">Horizontal Boring (L/R/B/T)</span></div>
+              <div class="spindle-card"><span class="sp-num">T1</span><span class="sp-tool">Ø12mm Main Router</span></div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- CNC Center: Pod & Rail Clamping & 2D Tooling View -->
+        <main class="cnc-center-panel">
+          <div class="cnc-toolbar">
+            <div class="cnc-title">
+              <span class="chip warn">STOP 1 (ORIGIN 1)</span>
+              <strong id="cncActivePartTitle">Select a part to preview machining</strong>
+            </div>
+            <div class="cnc-actions">
+              <button id="btnDistributeLan" class="btn ok small">🚀 Push Batch to Rover A (LAN Drop)</button>
+              <button id="btnMarkCncComplete" class="btn small">✔ Mark Machining Done</button>
+            </div>
+          </div>
+
+          <div class="cnc-viewer-host" id="cncViewerHost">
+            <div id="viewer2dCnc" class="viewer"></div>
+          </div>
+
+          <div class="cnc-network-status-bar" id="cncNetworkStatusBar">
+            <span class="dot"></span>
+            <span id="cncNetMsg">LAN Target: /mnt/workshop/rover-a (Ready)</span>
+          </div>
+        </main>
+
+        <!-- CNC Right: Native CIX Code Inspector -->
+        <aside class="cnc-right-panel">
+          <div class="panel-header">
+            <h2>bSolid .cix Program</h2>
+            <button id="btnDownloadCix" class="btn small ghost">⬇ Download .cix</button>
+          </div>
+          <div class="cix-code-container">
+            <pre class="cix-code-block" id="cixCodePreview">; Select a part or scan barcode to view .cix code</pre>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- STATION 3: CUT RITE & BEAM SAW (Module A) -->
+    <!-- ================================================================= -->
+    <section class="station-view hidden" id="view-saw">
+      <div class="saw-layout">
+        <div class="scroll">
+          <!-- Top Synchronization & Export Card -->
+          <div class="card saw-header-card">
+            <div class="saw-top-row">
+              <div>
+                <h2>Cut Rite Sheet Cutting &amp; Barcode Pipeline</h2>
+                <p class="muted">Standardized CSV generation for Holzma HPP beam saws + 100% File Name Synchronization</p>
+              </div>
+              <div class="saw-actions">
+                <a id="btnDownloadCutRiteCsv" class="btn ok" href="#" download>⬇ Download Cut Rite CSV</a>
+                <button id="btnPrintLabelsFromSaw" class="btn">🖨 Print Barcode Labels</button>
+              </div>
+            </div>
+
+            <!-- Synchronization Verification Card -->
+            <div class="sync-verification-box" id="syncVerificationBox">
+              <div class="sync-icon">✔</div>
+              <div class="sync-text">
+                <strong>File Name &amp; Barcode Synchronization Active:</strong>
+                <span id="syncStatText">15 of 15 parts have perfectly synchronized Part Codes, Barcodes, and bSolid .cix file names.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Cut Rite CSV Table Preview -->
+          <div class="card">
+            <div class="section-head">
+              <h2>Cut Rite Optimization Import Table</h2>
+              <span id="cutRitePartCount" class="chip">15 parts</span>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table" id="cutRiteTable">
+                <thead>
+                  <tr>
+                    <th>Part Code (Synced)</th>
+                    <th>Description</th>
+                    <th>Material</th>
+                    <th>Length (X)</th>
+                    <th>Width (Y)</th>
+                    <th>T (mm)</th>
+                    <th>Qty</th>
+                    <th>Grain</th>
+                    <th>Edge L1 (Top)</th>
+                    <th>Edge L2 (Bot)</th>
+                    <th>Edge W1 (Left)</th>
+                    <th>Edge W2 (Right)</th>
+                    <th>CNC Program (.cix)</th>
+                    <th>Barcode</th>
+                  </tr>
+                </thead>
+                <tbody id="cutRiteTableBody">
+                  <!-- dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Barcode Labels Section -->
+          <div class="card">
+            <div class="section-head">
+              <h2>Part Labels (Thermal Barcode Ready)</h2>
+              <button id="btnPrintAllLabels" class="btn small">🖨 Print All Labels</button>
+            </div>
+            <div class="labels-grid" id="sawLabelsGrid">
+              <!-- Barcode label cards -->
+            </div>
           </div>
         </div>
-        <div class="viewer-host">
-          <div id="viewer2d" class="viewer"></div>
-          <div id="viewer3d" class="viewer hidden"></div>
-          <div id="viewerEmpty" class="empty-hint">Import or load a project to begin.</div>
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- STATION 4: CAM, PRE-FLIGHT VALIDATION & SETTINGS -->
+    <!-- ================================================================= -->
+    <section class="station-view hidden" id="view-cam">
+      <div class="cam-layout">
+        <!-- Sub Navigation -->
+        <div class="cam-subnav">
+          <button data-cam-tab="import" class="cam-tab active">📁 Import Batch</button>
+          <button data-cam-tab="preflight" class="cam-tab">🛡️ Pre-Flight Safety</button>
+          <button data-cam-tab="cad2d" class="cam-tab">📐 2D CAD Panel Viewer</button>
+          <button data-cam-tab="settings" class="cam-tab">⚙ Workshop Settings</button>
         </div>
-      </section>
 
-      <section class="tab-panel hidden" id="panel-validation"></section>
-      <section class="tab-panel hidden" id="panel-cix"></section>
-      <section class="tab-panel hidden" id="panel-bom"></section>
-      <section class="tab-panel hidden" id="panel-settings"></section>
-    </main>
+        <!-- CAM Tab 1: Import Batch -->
+        <div class="cam-panel" id="campanel-import">
+          <div class="card">
+            <h2>Multi-Track Polyboard Batch Import</h2>
+            <p class="muted">Ingest cutting list text files, assembly/hardware CSVs, and geometric DXFs</p>
+            <div class="dropzone" id="dropzoneMain">
+              <div class="dz-icon">⇩</div>
+              <p><strong>Drag and drop Polyboard export folder or files here</strong></p>
+              <p class="muted">Supports cutting-list .txt, assembly .csv, and per-part .dxf</p>
+              <input type="file" id="fileInputMain" multiple accept=".txt,.csv,.dxf" />
+              <input type="file" id="folderInputMain" webkitdirectory multiple />
+              <div class="row" style="margin-top: 10px; gap: 10px;">
+                <label class="btn" for="folderInputMain">Choose Folder</label>
+                <label class="btn ghost" for="fileInputMain">Choose Files</label>
+                <button class="btn ok" id="btnLoadSampleCam">▶ Load Demo Kitchen</button>
+              </div>
+            </div>
+            <div class="import-status" id="camImportStatus"></div>
+          </div>
+        </div>
 
-    <!-- Right: inspector -->
-    <aside class="inspector" id="inspector">
-      <div class="section-head"><h2>Panel</h2></div>
-      <div id="inspectorBody" class="empty-hint">Select a panel in the tree.</div>
-    </aside>
+        <!-- CAM Tab 2: Pre-Flight Safety Engine -->
+        <div class="cam-panel hidden" id="campanel-preflight">
+          <div class="card">
+            <div class="section-head">
+              <h2>Pre-Flight Validation Engine</h2>
+              <button id="btnRevalidate" class="btn small ghost">↻ Re-check Batch</button>
+            </div>
+            <div id="preflightSummary" class="summary-row"></div>
+            <div id="preflightIssues" class="issues-list" style="margin-top: 14px;"></div>
+          </div>
+        </div>
+
+        <!-- CAM Tab 3: 2D CAD Panel Viewer -->
+        <div class="cam-panel hidden" id="campanel-cad2d">
+          <div class="cad2d-container">
+            <div class="cad2d-toolbar">
+              <label class="check-box"><input type="checkbox" id="chkCadDrills" checked /> Drillings</label>
+              <label class="check-box"><input type="checkbox" id="chkCadGrooves" checked /> Router Paths</label>
+              <label class="check-box"><input type="checkbox" id="chkCadBand" checked /> Edge Banding</label>
+              <label class="check-box"><input type="checkbox" id="chkCadOrigins" checked /> Reference Stops</label>
+            </div>
+            <div class="cad2d-host" id="cad2dHost">
+              <div id="viewer2dCam" class="viewer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CAM Tab 4: Workshop Settings -->
+        <div class="cam-panel hidden" id="campanel-settings">
+          <div class="card">
+            <h2>Workshop Network &amp; Machine Distribution</h2>
+            <div class="form-grid">
+              <div class="field">
+                <label>Protocol</label>
+                <select id="cfgProtocol">
+                  <option value="local">Local directory / Mounted SMB Share</option>
+                  <option value="smb">SMB Network Protocol</option>
+                </select>
+              </div>
+              <div class="field" style="grid-column: span 2">
+                <label>Rover A Drop Directory (LAN Path)</label>
+                <input type="text" id="cfgTargetDir" value="/mnt/workshop" placeholder="/mnt/workshop or \\\\nas\\bSolid" />
+              </div>
+            </div>
+            <h3 style="margin: 14px 0 6px">Machine Folders</h3>
+            <div id="cfgMachineFoldersList"></div>
+            <button class="btn small ghost" id="btnAddMachineFolder" style="margin-top: 8px">+ Add Machine Subfolder</button>
+          </div>
+
+          <div class="card" style="margin-top: 14px;">
+            <h2>Biesse Tooling Spindle Table</h2>
+            <table class="data-table">
+              <thead><tr><th>Tool ID</th><th>Name</th><th>Type</th><th>Ø (mm)</th><th>Spindle Index</th></tr></thead>
+              <tbody id="cfgToolingTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="row" style="margin-top: 16px;">
+            <button class="btn ok" id="btnSaveWorkshopSettings">Save Settings</button>
+            <span id="settingsSaveMsg" class="muted"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </div>
 
-  <footer class="statusbar" id="statusbar">Ready.</footer>
+  <!-- Status Bar -->
+  <footer class="statusbar" id="statusbar">
+    <span class="dot"></span>
+    <span id="statusText">System ready.</span>
+  </footer>
 
   <script>
-    // Fail-safe diagnostics — plain script, runs even if the module below
-    // never loads (caching, old browser, or a network error on a vendor file).
+    // Fail-Safe Diagnostics & Error Catcher
     (function () {
-      var b = document.getElementById('fatalBanner');
-      var status = document.getElementById('statusbar');
-      function show(msg) {
-        if (b) { b.hidden = false; b.innerHTML = msg; }
+      var banner = document.getElementById('fatalBanner');
+      function report(msg) {
+        if (banner) {
+          banner.hidden = false;
+          banner.innerHTML = '<strong>⚠ Application Alert:</strong> ' + msg + '<br><small>Try pressing <b>Ctrl+Shift+R</b> to force-refresh, or open <a href="/diag.html" style="color:#fff;text-decoration:underline">Diagnostics</a> or <a href="/lite.html" style="color:#fff;text-decoration:underline">Lite Mode</a>.</small>';
+        }
       }
       window.addEventListener('error', function (e) {
-        if (e && e.message) show('⚠ Script error: ' + e.message);
+        if (e && e.message) report(e.message + (e.filename ? ' (' + e.filename + ':' + e.lineno + ')' : ''));
       });
       window.addEventListener('unhandledrejection', function (e) {
         var r = e.reason;
-        show('⚠ Error: ' + (r && r.message ? r.message : String(r)));
+        report('Unhandled Promise: ' + (r && r.message ? r.message : String(r)));
       });
-
-      // Is this browser new enough for the app at all? (checks optional
-      // chaining + nullish coalescing, which the app code relies on)
-      try {
-        var probe = new Function('var o = null; return o && o.x ? 1 : (o?.x ?? 7);');
-        if (probe() !== 7) throw new Error('syntax');
-      } catch (err) {
-        show('⚠ Your browser is too old for this app. Update Chrome or Edge, then reload this page.');
-        if (status) status.innerHTML = 'Browser too old.';
-        return;
-      }
-
-      // Verify the vendor files actually served (catches missing public/vendor).
-      var assets = ['/vendor/three.module.js'];
-      var pending = assets.length;
-      assets.forEach(function (u) {
-        fetch(u).then(function (r) {
-          if (!r.ok) {
-            show('⚠ Missing asset <b>' + u + '</b> (HTTP ' + r.status + '). Run <b>npm install</b> to regenerate public/vendor.');
-          }
-        }).catch(function () {
-          show('⚠ Could not load <b>' + u + '</b>. Run <b>npm install</b> to regenerate public/vendor.');
-        }).finally(function () {
-          pending -= 1;
-        });
-      });
-
-      // If the app never reports ready, surface the browser info to copy here.
-      setTimeout(function () {
-        if (window.__appReady) return;
-        var ua = navigator.userAgent || 'unknown';
-        show('⚠ The app did not finish loading.<br>' +
-             'Browser: <b>' + ua + '</b><br>' +
-             '1) Press <b>Ctrl+Shift+R</b> to force-refresh.<br>' +
-             '2) If it still fails, press <b>F12</b> → <b>Console</b> and copy the red lines here.');
-      }, 3500);
     })();
   </script>
-  <script type="module" src="/js/app.js?v=5"></script>
+  <script type="module" src="/js/app.js?v=7"></script>
 </body>
 </html>

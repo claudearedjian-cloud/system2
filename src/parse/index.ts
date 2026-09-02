@@ -35,11 +35,17 @@ const DRILL_COLORS: Record<DrillFace, string> = {
   edge: '#00bcd4',
 };
 
+export function sanitizePartCode(raw: string): string {
+  // Convert to clean alphanumeric + hyphens + underscores (e.g. "JOB2026-CAB01-PART04")
+  return raw
+    .replace(/[^A-Za-z0-9_-]/g, '_')
+    .replace(/_{2,}/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+}
+
 function partIdFromFilename(name: string): string {
-  // e.g. "K1-001-Left Side.dxf", "001 - Left Side.dxf", "CAB2_P004.dxf"
   const base = name.replace(/\.[^.]+$/, '');
-  // Take the LAST numeric token (2-4 digits) as the part id — cabinet numbers
-  // come first in paths like "BASE-01-001-Left Side".
   const digits = base.match(/\d{2,4}/g);
   if (digits && digits.length) return digits[digits.length - 1];
   return base;
@@ -91,34 +97,34 @@ export function importBatch(files: ImportFile[]): ImportResult {
   }
 
   // 4. Build panels from the cutting list (primary source of truth for
-  //    dimensions, material, edge banding and hardware).
+  // dimensions, material, edge banding and hardware).
   const panelsByCabinet = new Map<string, Panel[]>();
   const usedGeo = new Set<string>();
 
   for (const row of cuttingRows) {
     const cabinetId = row.cabinetId || 'UNASSIGNED';
-    const id = `${cabinetId}-${row.partId}`;
+    const rawId = `${cabinetId}-${row.partId}`;
+    const partCode = sanitizePartCode(rawId);
     const geo = geometry.get(row.partId.toLowerCase());
 
     let outline = geo?.outline?.length ? geo.outline : synthesizeRect(row.width, row.height);
     if (geo) usedGeo.add(row.partId.toLowerCase());
 
-    // Clamp the outline to the finished dimensions when geometry is missing or
-    // clearly inconsistent (unit mismatches produce 25.4x inflation).
+    // Clamp outline to finished dimensions when geometry is missing or inconsistent
     const bb = boundingBox(outline);
     const bbW = bb.maxX - bb.minX;
     const bbH = bb.maxY - bb.minY;
     if (!geo || bbW < 1 || bbH < 1) {
       outline = synthesizeRect(row.width, row.height);
     } else if (row.width > 0 && (bbW > row.width * 1.6 || bbH > row.height * 1.6)) {
-      // Likely a units mismatch (inches) — rescale to the stated millimetres.
       const sx = row.width / bbW;
       const sy = row.height / bbH;
       outline = outline.map((p) => ({ x: p.x * sx, y: p.y * sy }));
     }
 
     const panel: Panel = {
-      id,
+      id: rawId,
+      partCode,
       name: row.name,
       cabinetId,
       panelType: row.panelType,
@@ -131,23 +137,38 @@ export function importBatch(files: ImportFile[]): ImportResult {
       outline,
       drillings: (geo?.drillings ?? []).map((d, i) => ({
         kind: 'drill' as const,
-        id: `${id}-D${i}`,
+        id: `${rawId}-D${i}`,
         face: d.face,
         edge: d.edge,
         x: d.x,
         y: d.y,
         diameter: d.diameter,
-        // Default to a blind boring depth unless the hardware table says
-        // otherwise; the merge step below applies exact depths per fitting.
         depth: d.face === 'edge' ? 10 : Math.max(4, Math.min(d.diameter || 5, row.thickness * 0.5)),
         tool: d.face === 'edge' ? 'aggregate' : 'boring-block',
+        spindle: d.diameter === 35 ? 3 : d.diameter === 8 ? 2 : 1,
         note: d.note,
       })),
-      grooves: geo?.grooves ?? [],
+      grooves: (geo?.grooves ?? []).map((g) => ({
+        ...g,
+        width: g.width > 0 ? g.width : 8,
+        depth: g.depth > 0 ? g.depth : Math.min(8, Math.max(4, row.thickness * 0.45)),
+      })),
       edgeband: row.edgeband,
       hardware: [],
       assemblyFlags: [],
       sourceFile: geo?.file ?? undefined,
+      cixFileName: `${partCode}.cix`,
+      barcode: partCode,
+      status: 'pending_cut',
+      history: [
+        {
+          timestamp: new Date().toISOString(),
+          fromStatus: 'pending_cut',
+          toStatus: 'pending_cut',
+          station: 'manual',
+          note: 'Imported from Polyboard export',
+        },
+      ],
     };
 
     const list = panelsByCabinet.get(cabinetId) ?? [];
@@ -159,10 +180,12 @@ export function importBatch(files: ImportFile[]): ImportResult {
   for (const [key, geo] of geometry) {
     if (usedGeo.has(key)) continue;
     const cabinetId = geo.cabinetHint ?? 'UNASSIGNED';
-    const id = `${cabinetId}-${key.toUpperCase()}`;
+    const rawId = `${cabinetId}-${key.toUpperCase()}`;
+    const partCode = sanitizePartCode(rawId);
     const bb = boundingBox(geo.outline.length ? geo.outline : synthesizeRect(100, 100));
     const panel: Panel = {
-      id,
+      id: rawId,
+      partCode,
       name: key.toUpperCase(),
       cabinetId,
       panelType: 'Panel',
@@ -175,7 +198,7 @@ export function importBatch(files: ImportFile[]): ImportResult {
       outline: geo.outline.length ? geo.outline : synthesizeRect(bb.maxX - bb.minX, bb.maxY - bb.minY),
       drillings: geo.drillings.map((d, i) => ({
         kind: 'drill' as const,
-        id: `${id}-D${i}`,
+        id: `${rawId}-D${i}`,
         face: d.face,
         edge: d.edge,
         x: d.x,
@@ -183,20 +206,36 @@ export function importBatch(files: ImportFile[]): ImportResult {
         diameter: d.diameter,
         depth: d.face === 'edge' ? 10 : Math.max(4, Math.min(d.diameter || 5, 9)),
         tool: d.face === 'edge' ? 'aggregate' : 'boring-block',
+        spindle: d.diameter === 35 ? 3 : d.diameter === 8 ? 2 : 1,
       })),
-      grooves: geo.grooves,
+      grooves: (geo.grooves ?? []).map((g) => ({
+        ...g,
+        width: g.width > 0 ? g.width : 8,
+        depth: g.depth > 0 ? g.depth : 8,
+      })),
       edgeband: [],
       hardware: [],
       assemblyFlags: [],
       sourceFile: geo.file,
+      cixFileName: `${partCode}.cix`,
+      barcode: partCode,
+      status: 'pending_cut',
+      history: [
+        {
+          timestamp: new Date().toISOString(),
+          fromStatus: 'pending_cut',
+          toStatus: 'pending_cut',
+          station: 'manual',
+          note: 'Imported from DXF geometry',
+        },
+      ],
     };
     const list = panelsByCabinet.get(cabinetId) ?? [];
     list.push(panel);
     panelsByCabinet.set(cabinetId, list);
   }
 
-  // 6. Attach hardware + assembly flags, then reconcile hardware depth and
-  //    diameter onto matching drill operations (Biesse tool mapping).
+  // 6. Attach hardware + assembly flags, then reconcile hardware depth and diameter
   attachHardware(hardwareRows, [...panelsByCabinet.values()].flat());
   mergeHardwareDepths([...panelsByCabinet.values()].flat());
 
@@ -204,11 +243,15 @@ export function importBatch(files: ImportFile[]): ImportResult {
   const cabinets: Cabinet[] = [];
   for (const [cabinetId, panels] of panelsByCabinet) {
     panels.sort((a, b) => a.panelType.localeCompare(b.panelType) || a.name.localeCompare(b.name));
+    const { placements, width, height, depth } = placeCabinet(panels);
     cabinets.push({
       id: cabinetId,
       name: cabinetId === 'UNASSIGNED' ? 'Unassigned parts' : cabinetId,
       panels,
-      placements: placeCabinet(panels),
+      placements,
+      width,
+      height,
+      depth,
     });
   }
   cabinets.sort((a, b) => a.name.localeCompare(b.name));
@@ -229,6 +272,13 @@ export function importBatch(files: ImportFile[]): ImportResult {
       partInstances: allPanels.reduce((s, p) => s + p.qty, 0),
       materials,
       thicknesses,
+      statusSummary: {
+        pendingCut: allPanels.reduce((s, p) => s + (p.status === 'pending_cut' ? p.qty : 0), 0),
+        cutReady: allPanels.reduce((s, p) => s + (p.status === 'cut_ready' ? p.qty : 0), 0),
+        machined: allPanels.reduce((s, p) => s + (p.status === 'machined' ? p.qty : 0), 0),
+        staged: allPanels.reduce((s, p) => s + (p.status === 'staged' ? p.qty : 0), 0),
+        assembled: allPanels.reduce((s, p) => s + (p.status === 'assembled' ? p.qty : 0), 0),
+      },
     },
   };
 
@@ -239,18 +289,13 @@ export function importBatch(files: ImportFile[]): ImportResult {
   return { project, unmatched, skipped: [] };
 }
 
-// ---------------------------------------------------------------------------
-// 3D placement heuristics: build a plausible cabinet assembly from panel
-// types.  World axes: X = width, Y = height (up), Z = depth.
-// ---------------------------------------------------------------------------
-
 /** Apply exact fitting depth/diameter from the hardware table to matching drills. */
 function mergeHardwareDepths(panels: Panel[]): void {
   for (const panel of panels) {
     for (const hw of panel.hardware) {
       if (hw.diameter === undefined && hw.depth === undefined) continue;
       let best: (typeof panel.drillings)[number] | undefined;
-      let bestDist = 2.5;
+      let bestDist = 4.0;
       for (const d of panel.drillings) {
         if (d.face !== hw.face) continue;
         const dist = Math.hypot(d.x - hw.x, d.y - hw.y);
@@ -275,7 +320,7 @@ function classify(panelType: string): 'side' | 'horizontal' | 'back' | 'front' {
   return 'horizontal';
 }
 
-function placeCabinet(panels: Panel[]): PanelPlacement[] {
+function placeCabinet(panels: Panel[]): { placements: PanelPlacement[]; width: number; height: number; depth: number } {
   const sides = panels.filter((p) => classify(p.panelType) === 'side');
   const horizontals = panels.filter((p) => classify(p.panelType) === 'horizontal');
   const backs = panels.filter((p) => classify(p.panelType) === 'back');
@@ -287,20 +332,18 @@ function placeCabinet(panels: Panel[]): PanelPlacement[] {
 
   const placements: PanelPlacement[] = [];
   let leftTaken = false;
-  let rightTaken = false;
-  const shelfYs: number[] = [];
 
   for (const p of sides) {
-    const onLeft = !leftTaken;
-    if (onLeft) leftTaken = true;
-    else rightTaken = true;
-    const x = onLeft ? 0 : width - p.thickness;
+    const isLeft = !leftTaken;
+    if (isLeft) leftTaken = true;
+    const x = isLeft ? 0 : width - p.thickness;
     placements.push({
       panelId: p.id,
-      origin: [x, 0, depth / 2],
-      uAxis: [1, 0, 0], // width along X
-      vAxis: [0, 1, 0], // height along Y
-      thicknessAxis: [0, 0, 1], // thickness along Z
+      origin: [x, 0, 0],
+      uAxis: [0, 0, 1], // local X -> depth (Z)
+      vAxis: [0, 1, 0], // local Y -> height (Y)
+      thicknessAxis: [1, 0, 0], // thickness along X
+      explodeVector: isLeft ? [-1.4, 0, 0] : [1.4, 0, 0],
     });
   }
 
@@ -309,18 +352,19 @@ function placeCabinet(panels: Panel[]): PanelPlacement[] {
   const tops = topBottoms.filter((p) => !bottoms.includes(p));
   const shelves = horizontals.filter((p) => !topBottoms.includes(p));
 
-  const placeHorizontal = (p: Panel, y: number) => {
+  const placeHorizontal = (p: Panel, y: number, explodeY: number) => {
     placements.push({
       panelId: p.id,
       origin: [0, y, 0],
-      uAxis: [1, 0, 0],
-      vAxis: [0, 0, 1], // panel height -> depth
-      thicknessAxis: [0, 1, 0],
+      uAxis: [1, 0, 0], // width along X
+      vAxis: [0, 0, 1], // height along Z (depth)
+      thicknessAxis: [0, 1, 0], // thickness along Y
+      explodeVector: [0, explodeY, 0],
     });
   };
 
-  bottoms.forEach((p) => placeHorizontal(p, 0));
-  tops.forEach((p) => placeHorizontal(p, height - p.thickness));
+  bottoms.forEach((p) => placeHorizontal(p, 0, -1.2));
+  tops.forEach((p) => placeHorizontal(p, height - p.thickness, 1.2));
 
   if (shelves.length > 0) {
     const usable = height - (tops.length ? tops[0].thickness : 18) - (bottoms.length ? bottoms[0].thickness : 18);
@@ -328,8 +372,7 @@ function placeCabinet(panels: Panel[]): PanelPlacement[] {
     const base = bottoms.length ? bottoms[0].thickness : 18;
     shelves.forEach((p, i) => {
       const y = base + step * (i + 1);
-      shelfYs.push(y);
-      placeHorizontal(p, y);
+      placeHorizontal(p, y, (i - (shelves.length - 1) / 2) * 0.5);
     });
   }
 
@@ -337,9 +380,10 @@ function placeCabinet(panels: Panel[]): PanelPlacement[] {
     placements.push({
       panelId: p.id,
       origin: [0, 0, 0],
-      uAxis: [1, 0, 0],
-      vAxis: [0, 1, 0],
-      thicknessAxis: [0, 0, 1],
+      uAxis: [1, 0, 0], // width along X
+      vAxis: [0, 1, 0], // height along Y
+      thicknessAxis: [0, 0, 1], // thickness along Z
+      explodeVector: [0, 0, -1.4],
     });
   }
 
@@ -350,10 +394,11 @@ function placeCabinet(panels: Panel[]): PanelPlacement[] {
       uAxis: [1, 0, 0],
       vAxis: [0, 1, 0],
       thicknessAxis: [0, 0, 1],
+      explodeVector: [0, 0, 1.4],
     });
   }
 
-  return placements;
+  return { placements, width, height, depth };
 }
 
 export { DRILL_COLORS };

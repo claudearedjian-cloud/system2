@@ -16,9 +16,13 @@ export function buildBom(project: Project, settings: Settings): BomReport {
         .join(', ');
       const secondaryOps = panel.assemblyFlags.slice();
       const hardware = panel.hardware.map((h) => h.kind);
+      const partCode = panel.partCode || panel.id;
+      const cixFileName = panel.cixFileName || `${partCode}.cix`;
+      const barcode = panel.barcode || partCode;
 
       lines.push({
         partId: panel.id,
+        partCode,
         name: panel.name,
         cabinet: cabinet.name,
         material: panel.material,
@@ -30,6 +34,9 @@ export function buildBom(project: Project, settings: Settings): BomReport {
         edgeband,
         secondaryOps,
         hardware,
+        cixFileName,
+        barcode,
+        status: panel.status || 'pending_cut',
       });
 
       const key = `${panel.material}|${panel.thickness}`;
@@ -95,8 +102,10 @@ export function buildLabels(project: Project, bom: BomReport): LabelData[] {
   for (const cabinet of project.cabinets) {
     for (const panel of cabinet.panels) {
       const line = byId.get(panel.id);
+      const partCode = panel.partCode || panel.id;
       labels.push({
         partId: panel.id,
+        partCode,
         project: project.name || 'Unnamed project',
         cabinet: cabinet.name,
         name: panel.name,
@@ -107,16 +116,12 @@ export function buildLabels(project: Project, bom: BomReport): LabelData[] {
         edgeband: line?.edgeband ?? '',
         secondaryOps: line?.secondaryOps ?? [],
         qty: panel.qty,
-        barcode: barcodePayload(panel.id),
+        cixFileName: panel.cixFileName || `${partCode}.cix`,
+        barcode: panel.barcode || partCode,
       });
     }
   }
   return labels;
-}
-
-/** Code-128 payload for the part label: ID, project, material, edge info. */
-function barcodePayload(partId: string): string {
-  return `P:${partId}`;
 }
 
 function round2(n: number): number {
@@ -128,9 +133,43 @@ export function csvEscape(s: string): string {
 }
 
 export function bomToCsv(bom: BomReport): string {
-  const header = ['Part ID', 'Name', 'Cabinet', 'Material', 'Thickness', 'Width', 'Height', 'Qty', 'Area m2', 'Edgeband', 'Secondary ops', 'Hardware'];
+  const header = [
+    'Part ID',
+    'Part Code',
+    'Name',
+    'Cabinet',
+    'Material',
+    'Thickness',
+    'Width',
+    'Height',
+    'Qty',
+    'Area m2',
+    'Edgeband',
+    'Secondary ops',
+    'Hardware',
+    'CIX Program',
+    'Barcode',
+    'Status',
+  ];
   const rows = bom.lines.map((l) =>
-    [l.partId, l.name, l.cabinet, l.material, l.thickness, l.width, l.height, l.qty, l.areaM2, l.edgeband, l.secondaryOps.join(';'), l.hardware.join(';')]
+    [
+      l.partId,
+      l.partCode,
+      l.name,
+      l.cabinet,
+      l.material,
+      l.thickness,
+      l.width,
+      l.height,
+      l.qty,
+      l.areaM2,
+      l.edgeband,
+      l.secondaryOps.join(';'),
+      l.hardware.join(';'),
+      l.cixFileName,
+      l.barcode,
+      l.status,
+    ]
       .map((v) => csvEscape(String(v)))
       .join(','),
   );

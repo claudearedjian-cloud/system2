@@ -1,40 +1,18 @@
 /**
- * Native Biesse bSolid .cix compiler (Module C).
+ * Native Biesse bSolid .cix compiler (Module B: Pod-and-Rail Optimizations).
  *
- * The .cix file is Biesse's part program for the Rover A controlled through
- * bSolid.  A CIX file is a plain-text, line-oriented program whose blocks are
- * composed of an alphanumeric operation label followed by numeric coordinate
- * parameters, with numeric values that carry an explicit sign prefix.
+ * Emits clean ASCII-text part programs for the Biesse Rover A (Pod-and-Rail).
  *
- * ⚠️  IMPORTANT — this generator is a clean, documented best-effort
- *     implementation of the CIX instruction-block structure.  Biesse's exact
- *     bSolid dialect is proprietary; ALWAYS verify the output on the real
- *     machine (and against your bSolid post-processor) before production.
- *     The `prelude`/`postlude` template strings below are the hook for
- *     machine-specific header blocks and can be edited without touching the
- *     geometry logic.
- *
- * Operation labels emitted here follow the common Biesse alphanumeric set:
- *   PAN  — panel / piece definition
- *   LPX  — linear positioning on X
- *   LPY  — linear positioning on Y
- *   LPZ  — linear positioning on Z
- *   XOR  — X origin shift
- *   YOR  — Y origin shift
- *   BOR  — boring / drilling operation
- *   ROU  — routing operation
- *   RAI  — routing / grooving operation
- *   FNC  — function (tool selection, spindle)
- *   DIM  — dimension declaration
- *   EPN  — end of panel
- *
- * The compiler is driven by a generic post-processor model so that the exact
- * block syntax can be swapped for a machine-verified template later.
+ * Pod-and-Rail Specifics:
+ * - Default geometric positioning on Stop 1 (Origin 1) field layout.
+ * - Clean edge-referencing for horizontal boring aggregates (L/R/B/T).
+ * - Spindle array mapping for vertical boring head (5mm, 8mm, 35mm hinge cups).
+ * - Toolpath compensation for router grooves/dados.
+ * - Alphanumeric filename synchronized with Cut Rite part code and barcode.
  */
-import type { CixFile, Panel, Project, Settings, ValidationReport } from '../shared/types.js';
+import type { CixFile, DrillOp, GrooveOp, Panel, Project, Settings, ValidationReport } from '../shared/types.js';
 
 const S = (n: number): string => {
-  // Biesse-style signed numeric: values are written with an explicit sign.
   const v = Math.round(n * 100) / 100;
   return v >= 0 ? `+${v.toFixed(2)}` : `${v.toFixed(2)}`;
 };
@@ -50,15 +28,14 @@ function label(name: string, len = 3): string {
 
 export interface CixOptions {
   settings: Settings;
-  /** Header block for the machine (e.g. program number, material). */
   prelude?: (panel: Panel, opts: { settings: Settings }) => string[];
-  /** Trailer block. */
   postlude?: () => string[];
 }
 
 export function panelFileName(panel: Panel): string {
-  const id = panel.id.replace(/[^A-Za-z0-9._-]/g, '_').toUpperCase();
-  return `${id}.cix`;
+  if (panel.cixFileName) return panel.cixFileName;
+  const code = (panel.partCode || panel.id).replace(/[^A-Za-z0-9._-]/g, '_').toUpperCase();
+  return `${code}.cix`;
 }
 
 export function compilePanel(panel: Panel, options: CixOptions): string {
@@ -68,45 +45,93 @@ export function compilePanel(panel: Panel, options: CixOptions): string {
   const prelude = options.prelude ?? defaultPrelude;
   lines.push(...prelude(panel, { settings }));
 
-  // Piece definition: dimensions + thickness.
-  lines.push(`${label('PAN')} ${padName(panel.id)}`);
+  // Pod-and-Rail workpiece setup (Origin 1 = Stop 1 Left-Bottom)
+  const partName = panel.partCode || panel.id;
+  lines.push(`${label('PAN')} ${padName(partName)}`);
   lines.push(`${label('DIM')} X${S(panel.width)} Y${S(panel.height)} T${S(panel.thickness)}`);
+  lines.push(`${label('ORG')} 1 ; Pod-and-rail Stop 1 (Left-Bottom Reference)`);
+  lines.push(`${label('ZSF')} +50.00 ; Safe Z Clearance Plane`);
 
-  // Face drillings (boring block).
-  if (panel.drillings.length) {
-    const faceDrills = panel.drillings.filter((d) => d.face !== 'edge');
-    if (faceDrills.length) {
-      lines.push(`${label('FNC')} BOR  ON`); // activate boring unit
-      for (const d of faceDrills) {
-        lines.push(`${label('LPX')} ${S(d.x)}`);
-        lines.push(`${label('LPY')} ${S(d.y)}`);
+  // Pod rail safety zone commentary
+  const minPodY = Math.min(panel.height, 120);
+  const maxPodY = Math.max(0, panel.height - 120);
+  lines.push(`; POD CLEARANCE: Rails @ Y=${minPodY.toFixed(0)}mm & Y=${maxPodY.toFixed(0)}mm | Vacuum Pods=130x130mm`);
+
+  // 1. Face drillings (Vertical Boring Head Spindle Array)
+  const faceDrills = panel.drillings.filter((d) => d.face !== 'edge');
+  if (faceDrills.length) {
+    lines.push('');
+    lines.push('; --- VERTICAL BORING UNIT (FACE DRILLING) ---');
+    lines.push(`${label('FNC')} BOR  ON`);
+
+    // Group drills by diameter to minimize spindle indexing
+    const byDiameter = new Map<number, DrillOp[]>();
+    for (const d of faceDrills) {
+      const dia = d.diameter || 5;
+      const list = byDiameter.get(dia) ?? [];
+      list.push(d);
+      byDiameter.set(dia, list);
+    }
+
+    for (const [dia, drills] of byDiameter) {
+      const spindle = dia === 35 ? 3 : dia === 8 ? 2 : 1;
+      const toolDesc = dia === 35 ? '35mm Hinge Cup' : dia === 8 ? '8mm Dowel Drill' : '5mm Shelf/System Drill';
+      lines.push(`; Tool: Spindle ${spindle} (Ø${dia}mm - ${toolDesc})`);
+      lines.push(`${label('SPD')} SP${spindle}`);
+
+      for (const d of drills) {
+        lines.push(`${label('LPX')} ${S(d.x)} ${label('LPY')} ${S(d.y)}`);
         lines.push(`${label('BOR')} D${S(d.diameter)} P${S(d.depth)}`);
       }
-      lines.push(`${label('FNC')} BOR  OFF`);
     }
+    lines.push(`${label('FNC')} BOR  OFF`);
   }
 
-  // Edge drillings (horizontal aggregate).
+  // 2. Edge drillings (Horizontal Boring Aggregate)
   const edgeDrills = panel.drillings.filter((d) => d.face === 'edge');
   if (edgeDrills.length) {
+    lines.push('');
+    lines.push('; --- HORIZONTAL BORING AGGREGATE (EDGE BORING) ---');
     lines.push(`${label('FNC')} AGG  ON`);
+
+    // Group by edge (L, R, B, T)
+    const byEdge = new Map<string, DrillOp[]>();
     for (const d of edgeDrills) {
-      lines.push(`${label('LPX')} ${S(d.x)}`);
-      lines.push(`${label('BOR')} D${S(d.diameter)} P${S(d.depth)} EDGE ${d.edge ?? 'L'}`);
+      const edge = d.edge ?? 'L';
+      const list = byEdge.get(edge) ?? [];
+      list.push(d);
+      byEdge.set(edge, list);
+    }
+
+    for (const [edge, drills] of byEdge) {
+      const edgeName = edge === 'L' ? 'Left Edge (X=0)' : edge === 'R' ? 'Right Edge (X=Max)' : edge === 'B' ? 'Bottom Edge (Y=0)' : 'Top Edge (Y=Max)';
+      lines.push(`; Edge Aggregate Face: ${edge} (${edgeName})`);
+      for (const d of drills) {
+        lines.push(`${label('LPX')} ${S(d.x)} ${label('LPY')} ${S(d.y)}`);
+        lines.push(`${label('BOR')} D${S(d.diameter)} P${S(d.depth)} EDGE ${edge}`);
+      }
     }
     lines.push(`${label('FNC')} AGG  OFF`);
   }
 
-  // Grooves / dados / routing.
+  // 3. Grooves / dados / routing toolpaths
   if (panel.grooves.length) {
-    const router = settings.tooling.tools.find((t) => t.type === 'router');
-    lines.push(`${label('FNC')} ROUT ON`);
-    for (const g of panel.grooves) {
+    const routerTool = settings.tooling.tools.find((t) => t.type === 'router');
+    const routerDia = routerTool?.diameter ?? settings.tooling.routerDiameter ?? 12;
+
+    lines.push('');
+    lines.push('; --- ROUTING SPINDLE (GROOVES / DADOS / PROFILING) ---');
+    lines.push(`${label('FNC')} ROUT ON T=ROUTER_D${routerDia}`);
+
+    for (let i = 0; i < panel.grooves.length; i++) {
+      const g = panel.grooves[i];
       const first = g.points[0];
       const last = g.points[g.points.length - 1];
       if (!first || !last) continue;
+
+      lines.push(`; Groove #${i + 1}: Width=${g.width || routerDia}mm, Depth=${g.depth}mm`);
       lines.push(`${label('LPX')} ${S(first.x)} ${label('LPY')} ${S(first.y)}`);
-      lines.push(`${label('RAI')} X${S(last.x)} Y${S(last.y)} W${S(g.width || (router?.diameter ?? 12))} P${S(g.depth)}`);
+      lines.push(`${label('RAI')} X${S(last.x)} Y${S(last.y)} W${S(g.width || routerDia)} P${S(g.depth)}`);
     }
     lines.push(`${label('FNC')} ROUT OFF`);
   }
@@ -123,10 +148,14 @@ export function compileProject(project: Project, settings: Settings, validation:
   for (const cabinet of project.cabinets) {
     for (const panel of cabinet.panels) {
       const content = compilePanel(panel, { settings });
+      const name = panelFileName(panel);
       files.push({
-        name: panelFileName(panel),
+        name,
         content,
         size: Buffer.byteLength(content, 'utf8'),
+        panelId: panel.id,
+        cabinetId: cabinet.id,
+        partCode: panel.partCode || panel.id,
       });
     }
   }
@@ -135,24 +164,31 @@ export function compileProject(project: Project, settings: Settings, validation:
 
 function defaultPrelude(panel: Panel, { settings }: { settings: Settings }): string[] {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const partCode = panel.partCode || panel.id;
+  const barcode = panel.barcode || partCode;
   const lines = [
-    ';------------------------------------------------------',
-    '; Biesse Rover A  -  bSolid native part program (.cix)',
-    `; PART  : ${panel.id}`,
-    `; DESC  : ${panel.name}  (${panel.panelType})`,
-    `; CAB   : ${panel.cabinetId}`,
-    `; MAT   : ${panel.material}  T=${panel.thickness}mm`,
-    `; SIZE  : ${panel.width} x ${panel.height} mm`,
-    `; GRAIN : ${panel.grain}`,
-    `; DATE  : ${date}`,
-    ';------------------------------------------------------',
+    ';======================================================',
+    '; Biesse Rover A  -  bSolid Native Part Program (.cix)',
+    '; Machine: Biesse Rover A Pod-and-Rail CNC',
+    `; PART CODE : ${partCode}`,
+    `; BARCODE   : ${barcode}`,
+    `; DESC      : ${panel.name}  (${panel.panelType})`,
+    `; CABINET   : ${panel.cabinetId}`,
+    `; MATERIAL  : ${panel.material}  T=${panel.thickness}mm`,
+    `; DIMENSIONS: ${panel.width} x ${panel.height} x ${panel.thickness} mm`,
+    `; GRAIN     : ${panel.grain}`,
+    `; DATE      : ${date}`,
+    ';======================================================',
   ];
   return lines;
 }
 
 function defaultPostlude(): string[] {
   return [
+    '',
     `${label('EPN')}`,
-    '; end of program',
+    ';======================================================',
+    '; END OF BSOLID CIX PROGRAM',
+    ';======================================================',
   ];
 }

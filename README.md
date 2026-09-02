@@ -1,138 +1,83 @@
-# system2 — Automated Cabinet Manufacturing Operations System
+# system2 — Unified Woodworking Operations Engine (Polyboard → Cut Rite / bSolid Pipeline)
 
-A web-based OPS engine that batch-processes native **Polyboard** exports, renders
-2D/3D previews, validates every panel, compiles native **bSolid-compliant
-`.cix`** part programs for the **Biesse Rover A**, and distributes them across
-the LAN to the machine and the nesting workstation.
+A responsive, web-based shop floor operations application that intercepts data from **Polyboard**, processes it simultaneously for raw sheet cutting (**Holzma / Cut Rite**) and CNC secondary machining (**Biesse Rover A Pod-and-Rail**), and creates an interactive tracking environment for the assembly zone using barcode scans.
 
-> Polyboard batch → parse → validate → preview → `.cix` → network → labels/BOM.
+> Polyboard Batch Export ➔ Cut Rite Optimization CSV & Labels + bSolid `.cix` Machine Programs ➔ LAN Network Push ➔ Touchscreen Assembly Tracking & 3D Highlighting.
 
 ---
 
-## Quick start
+## Target Infrastructure
+
+- **Beam Saw:** Holzma HPP via Cut Rite optimization software (raw sheet cutting, grain optimization, edging specs, initial barcode labeling).
+- **CNC Machine:** Biesse Rover A (Pod-and-Rail machine utilizing native `.cix` instruction packages for face drilling, edge boring aggregates, and routing).
+- **Tracking Stations:** Shop floor touchscreen tablets equipped with hardware USB/Bluetooth keyboard-emulated barcode readers.
+
+---
+
+## Quick Start
 
 ```bash
 npm install          # installs deps + vendors Three.js into public/vendor
-npm run sample       # (optional) regenerate the bundled demo kitchen
+npm run sample       # regenerate the bundled demo kitchen (2 cabinets, 15 parts)
 npm run dev          # starts the OPS server on http://localhost:4000
 ```
 
-Open **http://localhost:4000** in Chrome/Edge, then click **▶ Load sample** to
-import the bundled demo kitchen (2 cabinets, 15 parts) and click through the
-pipeline.
+Open **http://localhost:4000** in Chrome/Edge, then click **▶ Sample** to load the bundled demo kitchen.
 
-The app is fully self-contained (no CDN, no bundler) so it runs on offline
-shop-floor workstations.
+The application is self-contained (zero CDN dependencies) and optimized for offline shop-floor workstations and touch tablets.
 
 ---
 
-## What it does (mapped to the spec)
+## System Modules & Implementation
 
-| Spec module | Implementation |
-| --- | --- |
-| **A — Batch ingestion & bulk parsing** | `src/parse/*` — drag-drop / folder picker in the browser, or server-side folder import (`POST /api/import-folder`). Parses Polyboard-style cutting-list `.txt`, assembly/hardware `.csv` and per-part `.dxf` (LWPOLYLINE/POLYLINE/LINE/ARC/CIRCLE/TEXT), groups parts by **Cabinet ID → Panel Type → Material Thickness**, extracts dimensions, material, grain, edge-banding, drillings, grooves/dados and assembly flags. Hardware coordinates are reconciled onto drill ops (Biesse tool mapping). |
-| **B — Interactive 2D/3D viewer** | `public/js/viewer2d.js`, `viewer3d.js` — project tree sidebar; orthographic 2D panel view color-coding **face drillings**, **edge drillings**, **routing toolpaths** and **edge banding**; Three.js/WebGL 3D assembly preview with rotate/zoom/pan (OrbitControls); **pre-flight validation engine** (`src/validate.ts`) flags off-panel holes, overlapping holes, over-deep holes, missing dimensions, duplicate IDs, etc. |
-| **C — CIX generation & network automation** | `src/cix.ts` — compiles each panel into a native-style `.cix` program (clean alphanumeric blocks, signed coordinates). `POST /api/projects/:id/distribute` writes the batch to every configured machine folder (local path or mounted SMB share). See [`docs/cix-format.md`](docs/cix-format.md). |
-| **D — Shop-floor execution & tracking** | `src/reports.ts` — bills of materials + cost summary (`GET .../bom`, `/bom.csv`) and barcode-ready part labels (`GET .../labels`, Code-128 in `public/js/code128.js`), printable from the BOM tab. The data model has hooks for inventory/stock deduction. |
+### Module A: Multi-Track Data Ingestion & Splitting
+- **Bulk Import Engine (`src/parse/*`):** Ingests Polyboard exports containing cutting lists (`.txt`), material specifications, assembly/hardware lists (`.csv`), and geometric DXFs (`.dxf`).
+- **Cut Rite Pipeline (`src/cutrite.ts`):** Formats raw structural dimensions, grain directions (`0=none, 1=length, 2=width`), quantities, and edge banding (`L1, L2, W1, W2`) into a standardized CSV import file compatible with Cut Rite optimization (`GET /api/projects/:id/cutrite.csv`).
+- **bSolid CIX Pipeline (`src/cix.ts`):** Extracts secondary tooling coordinates (hinge pockets, drawer slide holes, shelf pins, perimeter routing) and maps them against the active Biesse tooling spindle array.
+- **File Name Synchronization:** Programmatically enforces a shared structural naming convention. The part identifier passed to Cut Rite matches the alphanumeric filename of the generated bSolid `.cix` file and the printed Code-128 barcode value (e.g. `BASE-01-001` / `BASE-01-001.cix`).
 
----
+### Module B: Intelligent .cix Compilation (Pod-and-Rail Optimizations)
+- **Native CIX Generation (`src/cix.ts`):** Programmatically outputs clean ASCII-text `.cix` instruction packages ready for bSolid.
+- **Origin Setup & Pod-and-Rail Field Layout:** Workpiece setup referencing Stop 1 (`ORIGIN 1`), clearance planes (`ZSF +50.00`), pod clamping safe zones, and edge-boring aggregate offsets (`EDGE L/R/B/T`).
+- **Spindle Array Mapping:** Vertical boring head mapping (`Spindle 1: Ø5mm`, `Spindle 2: Ø8mm`, `Spindle 3: Ø35mm hinge cups`).
+- **Automated Network Drop (`POST /api/projects/:id/distribute`):** Pushes compiled `.cix` batches over the LAN to configured machine folders (e.g. `/mnt/workshop/rover-a` or mounted SMB shares).
 
-## Architecture
+### Module C: Interactive Production & Assembly Tracking Loop
+- **Persistent Production Database (`server/index.ts` & `data/state.json`):** Stores project hierarchies (`Project -> Cabinet ID -> Component Parts`) and tracks production status (`pending_cut` → `cut_ready` → `machined` → `staged` → `assembled`).
+- **Multi-Station UI Modes:**
+  1. **Assembly Zone:** Touchscreen interface for assembly technicians with 3D model, parts checklist, and hardware cards.
+  2. **CNC Rover A Station:** Operator screen displaying pod clamping setups, spindle array mapping, 2D machining view, and CIX code.
+  3. **Cut Rite Saw Station:** Sheet cutting table, Cut Rite CSV export, and printable barcode labels.
+  4. **CAM & Pre-Flight:** 2D CAD viewer, safety validation engine, and workshop settings.
+- **Global Barcode Input Listener (`public/js/barcode.js`):** Listens window-wide for rapid keystroke bursts (<40ms) from USB/Bluetooth handheld barcode scanners (Keyboard Emulation Mode) ending in `Enter`.
 
-```
-Browser (Chrome/Edge)                Node.js backend (tsx, no build step)
-┌─────────────────────────┐          ┌─────────────────────────────────────┐
-│ Three.js / WebGL        │  HTTP    │ server/index.ts                     │
-│  - 2D panel viewer      │ ───────▶ │  - static hosting + REST API        │
-│  - 3D assembly viewer   │  JSON    │  - project registry (data/state)    │
-│  - project tree, tabs   │          │  - settings (data/settings.json)    │
-│  - barcode labels       │ ◀─────── │                                     │
-└─────────────────────────┘          │ src/parse  → panels, drillings, ... │
-                                     │ src/validate → pre-flight report    │
-                                     │ src/cix    → .cix compilation       │
-                                     │ src/reports → BOM, labels, costs    │
-                                     └───────────────┬─────────────────────┘
-                                                     │ fs writes
-                                                     ▼
-                                    output/<project>/cix/   + LAN target folders
-```
-
-- **Shared data model:** `shared/types.ts` is the single source of truth
-  (panels, drillings, grooves, edge-banding, placements, settings).
-- **Persistence:** projects and settings persist to `data/` (git-ignored) so a
-  restart keeps the batch. Compiled output lands in `output/`.
-- **No build step:** the frontend is plain ES modules; Three.js and
-  OrbitControls are vendored to `public/vendor` by `scripts/vendor.mjs`.
-
-### Project layout
-
-```
-server/index.ts        HTTP server + REST API + network distribution
-shared/types.ts        canonical data model
-src/parse/             cutting-list, assembly/hardware, DXF parsers + importer
-src/validate.ts        pre-flight validation engine
-src/cix.ts             .cix compiler (Biesse bSolid block structure)
-src/reports.ts         BOM, cost summary, part labels
-src/settings.ts        workshop tooling / network / costing defaults
-scripts/generate-sample.ts  realistic Polyboard-style demo export
-public/                frontend (index.html, css, js, vendored three.js)
-sample-data/           bundled demo project (cutting-list.txt, hardware.csv, *.dxf)
-docs/cix-format.md     CIX block reference + safety notes
-```
+### Module D: Assembly Zone UI & Component Highlighter
+- **Real-Time Barcode Lookup (`POST /api/scan`):** Instant database query resolving Part ID and parent Cabinet ID from scanned barcode strings.
+- **Dynamic 3-Panel Screen Rendering:**
+  - **Left Panel (Cabinet Checklist):** Displays full cabinet parts checklist with progress bar (`e.g. 4 / 8 Parts Staged (50%)`). Automatically checks off scanned pieces and marks them as "Staged for Assembly".
+  - **Center Panel (Three.js WebGL 3D Renderer):** Displays an interactive 3D model of the assembled cabinet. **The scanned part flashes with a pulsing bright green glow (`#22c55e`)** relative to the rest of the assembly. Includes an **Exploded View slider** (0% to 100%) and **Ghost Mode** toggle.
+  - **Right Panel (Hardware Detail Cards):** Displays visual cards with graphic icons (`🚪 Hinge 35mm`, `🗄️ Drawer Slide`, `📍 Shelf Pin 5mm`, `🪵 Dowel 8mm`, `🔗 Minifix`, `🪛 Back Screw`) showing coordinates `(X, Y, Z)`, face orientation, and pre-assembly instructions.
 
 ---
 
-## Import formats
+## REST API Reference
 
-**Cutting-list `.txt`** — CSV/TSV with a header row. Columns are matched by
-name (case-insensitive): `Cabinet, Part ID, Name, Panel Type, Material,
-Thickness (mm), Width (mm), Height (mm), Qty, Grain, Edge L/R/B/T`.
-
-**Assembly / hardware `.csv`** — `Part, Hardware, Face, X, Y, Z, Diameter,
-Depth, Flag`. Rows key by part ID and merge onto panels; `dado`/`blind` kinds
-add assembly flags.
-
-**Part `.dxf`** — layer names classify geometry:
-`OUTLINE`/`PANEL` (outline), `DRILLINGS`/`DRILL_TOP` (face drilling),
-`DRILL_BOTTOM`, `DRILL_EDGE`/`EDGE`, `GROOVE`/`DADO` (routing). Units are read
-from `$INSUNITS`. Parts are matched to cutting-list rows by the part ID in the
-file name (e.g. `BASE-01-001-Left Side.dxf` → `001`).
-
----
-
-## API
-
-| Method | Route | Purpose |
+| Method | Endpoint | Description |
 | --- | --- | --- |
-| `POST` | `/api/import` | Ingest files `{name, files:[{name,content}]}` |
-| `POST` | `/api/import-folder` | Ingest a server-side folder path |
-| `POST` | `/api/load-sample` | Import the bundled demo kitchen |
-| `GET` | `/api/projects` | List projects |
-| `GET` | `/api/projects/:id` | Project detail |
-| `GET` | `/api/projects/:id/validation` | Pre-flight report |
-| `POST` | `/api/projects/:id/compile` | Validate + compile `.cix` |
-| `POST` | `/api/projects/:id/distribute` | Write `.cix` to network targets |
-| `GET` | `/api/projects/:id/cix/:name` | Download one `.cix` file |
-| `GET` | `/api/projects/:id/bom` / `/bom.csv` | BOM + cost summary |
-| `GET` | `/api/projects/:id/labels` | Barcode label data |
-| `GET`/`PUT` | `/api/settings` | Workshop configuration |
-
----
-
-## Network distribution (SMB/LAN)
-
-Settings → Network defines a **target directory** plus per-machine sub-folders
-(e.g. `rover-a`, `nesting`). On distribute, the full batch is written into each
-folder. For SMB shares, mount the share locally (Windows: map to `Z:\`; Linux:
-`/mnt/workshop`) and set the target to that path — the app writes ordinary
-files, so any NAS/NFS/SMB mount works. See `docs/cix-format.md` for machine-side
-notes.
-
-## ⚠️ CIX safety note
-
-The `.cix` compiler implements the documented Biesse alphanumeric block
-structure (see `docs/cix-format.md`), but **bSolid's exact dialect is
-proprietary and machine/post-processor specific**. Always dry-run the output on
-the real Rover A (and against your bSolid post-processor) before production,
-and treat the `prelude`/`postlude` templates in `src/cix.ts` as the hook for
-your machine's header blocks.
+| `POST` | `/api/scan` | Global hardware barcode scan endpoint (updates status & returns cabinet 3D highlight data) |
+| `POST` | `/api/load-sample` | Imports bundled kitchen demo batch (15 parts, 2 cabinets) |
+| `POST` | `/api/import` | Ingests uploaded Polyboard batch files |
+| `POST` | `/api/import-folder` | Ingests server-side export directory |
+| `GET` | `/api/projects` | Lists all imported projects and statistics |
+| `GET` | `/api/projects/:id` | Full project detail (cabinets, panels, 3D placements) |
+| `GET` | `/api/projects/:id/validation` | Pre-flight safety validation report |
+| `POST` | `/api/projects/:id/compile` | Compiles synchronized bSolid `.cix` instruction packages |
+| `POST` | `/api/projects/:id/distribute` | Pushes `.cix` batch across LAN network targets |
+| `GET` | `/api/projects/:id/cutrite` | Cut Rite optimization summary report |
+| `GET` | `/api/projects/:id/cutrite.csv` | Standard Cut Rite optimization CSV download |
+| `GET` | `/api/projects/:id/cix/:name` | Downloads individual `.cix` part program |
+| `GET` | `/api/projects/:id/bom` / `/bom.csv` | BOM, cost summary, and BOM CSV |
+| `GET` | `/api/projects/:id/labels` | Thermal Barcode label dataset |
+| `POST` | `/api/projects/:id/parts/:pid/status` | Updates individual part production tracking status |
+| `POST` | `/api/projects/:id/reset-status` | Resets project part statuses to `pending_cut` |
+| `GET`/`PUT` | `/api/settings` | Reads / writes workshop tooling, LAN paths, and costing settings |

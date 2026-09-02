@@ -2,7 +2,7 @@
  * Pre-flight validation engine (Module B).
  *
  * Runs a deterministic safety pass over the whole batch before any .cix code
- * is written.  Errors block compilation; warnings are reported but allowed.
+ * is written. Errors block compilation; warnings are reported but allowed.
  */
 import type { Panel, Project, ValidationIssue, ValidationReport } from '../shared/types.js';
 
@@ -18,11 +18,21 @@ export function validateProject(project: Project): ValidationReport {
     if (!panel.thickness || panel.thickness <= 0) {
       issues.push({ severity: 'error', code: 'NO_THICKNESS', panelId: panel.id, message: `Missing material thickness` });
     }
-    if (!panel.width || !panel.height) {
+    if (!panel.width || !panel.height || panel.width <= 0 || panel.height <= 0) {
       issues.push({ severity: 'error', code: 'NO_SIZE', panelId: panel.id, message: `Missing finished dimensions` });
     }
     if (!panel.material || panel.material === 'Unknown') {
       issues.push({ severity: 'warning', code: 'UNKNOWN_MATERIAL', panelId: panel.id, message: `Material is unknown — verify against cutting list` });
+    }
+
+    // Pod-and-Rail clamping check
+    if (panel.width < 70 || panel.height < 70) {
+      issues.push({ severity: 'warning', code: 'SMALL_PART_POD_CLAMP', panelId: panel.id, message: `Part (${panel.width}x${panel.height}mm) is narrow — verify pod-and-rail vacuum cup placement` });
+    }
+
+    // Naming & Barcode synchronization check
+    if (!panel.partCode || !/^[A-Za-z0-9_-]+$/.test(panel.partCode)) {
+      issues.push({ severity: 'error', code: 'INVALID_PART_CODE', panelId: panel.id, message: `Part code "${panel.partCode}" contains invalid characters for bSolid/Cut Rite synchronization` });
     }
 
     // Drill-hole checks
@@ -67,13 +77,16 @@ export function validateProject(project: Project): ValidationReport {
     }
   }
 
-  // Batch-level: duplicate part IDs
+  // Batch-level: duplicate part IDs or part codes
   const seen = new Map<string, number>();
   for (const p of panels) {
-    seen.set(p.id, (seen.get(p.id) ?? 0) + 1);
+    const key = p.partCode || p.id;
+    seen.set(key, (seen.get(key) ?? 0) + 1);
   }
   for (const [id, count] of seen) {
-    if (count > 1) issues.push({ severity: 'error', code: 'DUPLICATE_ID', panelId: id, message: `Part ID ${id} appears ${count} times in the batch` });
+    if (count > 1) {
+      issues.push({ severity: 'error', code: 'DUPLICATE_ID', panelId: id, message: `Part Code ${id} appears ${count} times in the batch` });
+    }
   }
 
   const errorCount = issues.filter((i) => i.severity === 'error').length;

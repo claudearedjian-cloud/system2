@@ -46,13 +46,16 @@ const parts: PartDef[] = [
       { layer: 'DRILLINGS', x: 30, y: 250, d: 5 },
       { layer: 'DRILLINGS', x: 30, y: 410, d: 5 },
       { layer: 'DRILLINGS', x: 30, y: 570, d: 5 },
+      { layer: 'DRILLINGS', x: 200, y: 150, d: 5 },
+      { layer: 'DRILLINGS', x: 232, y: 150, d: 5 },
     ],
     grooves: [{ x1: 20, y1: 0, x2: 20, y2: 560, width: 8, depth: 8 }],
     hardware: [
-      { kind: 'shelf pin 5mm', face: 'edge', x: 90, y: 0, z: 30, d: 5, depth: 8 },
-      { kind: 'shelf pin 5mm', face: 'edge', x: 250, y: 0, z: 30, d: 5, depth: 8 },
-      { kind: 'shelf pin 5mm', face: 'edge', x: 410, y: 0, z: 30, d: 5, depth: 8 },
-      { kind: 'shelf pin 5mm', face: 'edge', x: 570, y: 0, z: 30, d: 5, depth: 8 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 30, y: 90, z: 0, d: 5, depth: 8 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 30, y: 250, z: 0, d: 5, depth: 8 },
+      { kind: 'drawer slide runner', face: 'top', x: 200, y: 150, z: 0, d: 5, depth: 12 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 30, y: 410, z: 0, d: 5, depth: 8 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 30, y: 570, z: 0, d: 5, depth: 8 },
     ],
   },
   {
@@ -64,14 +67,32 @@ const parts: PartDef[] = [
       { layer: 'DRILLINGS', x: 530, y: 250, d: 5 },
       { layer: 'DRILLINGS', x: 530, y: 410, d: 5 },
       { layer: 'DRILLINGS', x: 530, y: 570, d: 5 },
+      { layer: 'DRILLINGS', x: 360, y: 150, d: 5 },
+      { layer: 'DRILLINGS', x: 328, y: 150, d: 5 },
     ],
     grooves: [{ x1: 540, y1: 0, x2: 540, y2: 560, width: 8, depth: 8 }],
+    hardware: [
+      { kind: 'shelf pin 5mm', face: 'top', x: 530, y: 90, z: 0, d: 5, depth: 8 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 530, y: 250, z: 0, d: 5, depth: 8 },
+      { kind: 'drawer slide runner', face: 'top', x: 360, y: 150, z: 0, d: 5, depth: 12 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 530, y: 410, z: 0, d: 5, depth: 8 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 530, y: 570, z: 0, d: 5, depth: 8 },
+    ],
   },
   {
     partId: '003', cabinet: BASE, name: 'Bottom', panelType: 'Bottom',
     material: '18mm Melamine White', thickness: 18, width: 564, height: 560, qty: 1,
     grain: 'horizontal', edgeL: 'ABS 1mm', edgeR: '', edgeB: '', edgeT: '',
-    drillings: [{ layer: 'DRILLINGS', x: 282, y: 40, d: 8 }],
+    drillings: [
+      { layer: 'DRILLINGS', x: 282, y: 40, d: 8 },
+      { layer: 'DRILLINGS', x: 40, y: 40, d: 8 },
+      { layer: 'DRILLINGS', x: 524, y: 40, d: 8 },
+    ],
+    hardware: [
+      { kind: 'dowel 8mm', face: 'edge', x: 40, y: 0, z: 0, d: 8, depth: 25 },
+      { kind: 'minifix cam connector', face: 'top', x: 282, y: 40, z: 0, d: 15, depth: 13 },
+      { kind: 'dowel 8mm', face: 'edge', x: 524, y: 0, z: 0, d: 8, depth: 25 },
+    ],
   },
   {
     partId: '004', cabinet: BASE, name: 'Top', panelType: 'Top',
@@ -82,16 +103,23 @@ const parts: PartDef[] = [
       { layer: 'DRILLINGS', x: 282, y: 300, d: 8 },
     ],
     hardware: [
-      { kind: 'dowel 8mm through', face: 'top', x: 282, y: 300, z: 0, d: 8, depth: 18 },
+      { kind: 'dowel 8mm', face: 'edge', x: 282, y: 0, z: 0, d: 8, depth: 25 },
+      { kind: 'minifix cam connector', face: 'top', x: 282, y: 300, z: 0, d: 15, depth: 13 },
     ],
   },
   {
     partId: '005', cabinet: BASE, name: 'Back', panelType: 'Back',
     material: '8mm MDF', thickness: 8, width: 600, height: 720, qty: 1,
     grain: 'none', edgeL: '', edgeR: '', edgeB: '', edgeT: '',
-    drillings: [{ layer: 'DRILLINGS', x: 300, y: 360, d: 5 }],
+    drillings: [
+      { layer: 'DRILLINGS', x: 300, y: 360, d: 5 },
+      { layer: 'DRILLINGS', x: 100, y: 50, d: 5 },
+      { layer: 'DRILLINGS', x: 500, y: 50, d: 5 },
+    ],
     hardware: [
       { kind: 'back screw 5mm', face: 'top', x: 300, y: 360, z: 0, d: 5, depth: 8 },
+      { kind: 'back screw 5mm', face: 'top', x: 100, y: 50, z: 0, d: 5, depth: 8 },
+      { kind: 'back screw 5mm', face: 'top', x: 500, y: 50, z: 0, d: 5, depth: 8 },
     ],
   },
   {
@@ -138,9 +166,9 @@ const parts: PartDef[] = [
       { layer: 'DRILLINGS', x: 30, y: 450, d: 5 },
     ],
     hardware: [
-      { kind: 'shelf pin 5mm', face: 'edge', x: 150, y: 0, z: 30, d: 5, depth: 8 },
-      { kind: 'shelf pin 5mm', face: 'edge', x: 300, y: 0, z: 30, d: 5, depth: 8 },
-      { kind: 'shelf pin 5mm', face: 'edge', x: 450, y: 0, z: 30, d: 5, depth: 8 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 30, y: 150, z: 0, d: 5, depth: 8 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 30, y: 300, z: 0, d: 5, depth: 8 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 30, y: 450, z: 0, d: 5, depth: 8 },
     ],
   },
   {
@@ -152,18 +180,37 @@ const parts: PartDef[] = [
       { layer: 'DRILLINGS', x: 290, y: 300, d: 5 },
       { layer: 'DRILLINGS', x: 290, y: 450, d: 5 },
     ],
+    hardware: [
+      { kind: 'shelf pin 5mm', face: 'top', x: 290, y: 150, z: 0, d: 5, depth: 8 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 290, y: 300, z: 0, d: 5, depth: 8 },
+      { kind: 'shelf pin 5mm', face: 'top', x: 290, y: 450, z: 0, d: 5, depth: 8 },
+    ],
   },
   {
     partId: '103', cabinet: WALL, name: 'Bottom', panelType: 'Bottom',
     material: '18mm Melamine White', thickness: 18, width: 564, height: 320, qty: 1,
     grain: 'horizontal', edgeL: 'ABS 1mm', edgeR: '', edgeB: '', edgeT: '',
-    drillings: [{ layer: 'DRILLINGS', x: 282, y: 40, d: 8 }],
+    drillings: [
+      { layer: 'DRILLINGS', x: 282, y: 40, d: 8 },
+      { layer: 'DRILLINGS', x: 40, y: 40, d: 8 },
+    ],
+    hardware: [
+      { kind: 'dowel 8mm', face: 'edge', x: 40, y: 0, z: 0, d: 8, depth: 25 },
+      { kind: 'minifix cam connector', face: 'top', x: 282, y: 40, z: 0, d: 15, depth: 13 },
+    ],
   },
   {
     partId: '104', cabinet: WALL, name: 'Top', panelType: 'Top',
     material: '18mm Melamine White', thickness: 18, width: 564, height: 320, qty: 1,
     grain: 'horizontal', edgeL: 'ABS 1mm', edgeR: '', edgeB: '', edgeT: '',
-    drillings: [{ layer: 'DRILLINGS', x: 282, y: 40, d: 8 }],
+    drillings: [
+      { layer: 'DRILLINGS', x: 282, y: 40, d: 8 },
+      { layer: 'DRILLINGS', x: 524, y: 40, d: 8 },
+    ],
+    hardware: [
+      { kind: 'dowel 8mm', face: 'edge', x: 524, y: 0, z: 0, d: 8, depth: 25 },
+      { kind: 'minifix cam connector', face: 'top', x: 282, y: 40, z: 0, d: 15, depth: 13 },
+    ],
   },
   {
     partId: '105', cabinet: WALL, name: 'Back', panelType: 'Back',
