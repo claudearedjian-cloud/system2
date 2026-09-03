@@ -67,17 +67,27 @@ function synthesizeRect(width: number, height: number): Vec2[] {
 }
 
 export function importBatch(files: ImportFile[]): ImportResult {
-  const txtFiles = files.filter((f) => /\.txt$/i.test(f.name));
-  const csvFiles = files.filter((f) => /\.csv$/i.test(f.name));
+  const textAndCsvFiles = files.filter((f) => /\.(txt|csv|tsv|tab|cut|list)$/i.test(f.name));
   const dxfFiles = files.filter((f) => /\.dxf$/i.test(f.name));
 
-  // 1. Cutting lists
+  // 1. Ingest Cutting lists & Hardware from any text/csv/tsv file
   const cuttingRows: CuttingListRow[] = [];
-  for (const f of txtFiles) cuttingRows.push(...parseCuttingList(f.content));
-
-  // 2. Assembly / hardware
   const hardwareRows = [];
-  for (const f of csvFiles) hardwareRows.push(...parseAssemblyCsv(f.content));
+
+  for (const f of textAndCsvFiles) {
+    const cutting = parseCuttingList(f.content);
+    const hasValidPanels = cutting.length > 0 && cutting.some((r) => r.width > 0 || r.height > 0);
+
+    if (hasValidPanels) {
+      cuttingRows.push(...cutting);
+    }
+
+    // Check if it also contains hardware fittings
+    const hw = parseAssemblyCsv(f.content);
+    if (hw.length > 0 && (!hasValidPanels || hw.some((h) => h.kind && h.kind !== 'hardware' && h.kind !== 'Panel'))) {
+      hardwareRows.push(...hw);
+    }
+  }
 
   // 3. DXF geometry keyed by part id
   const geometry = new Map<
